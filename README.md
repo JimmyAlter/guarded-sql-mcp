@@ -1,0 +1,270 @@
+# guarded-sql-mcp
+
+An MCP server that gives an LLM agent read access to a PostgreSQL database
+through a fixed catalog of parameterized queries. The model can pick a query
+and fill in bounded parameters. It cannot write SQL, and it cannot reach tables
+or columns that the catalog and the database role do not allow.
+
+The schema is a fictional IT asset inventory (sites, devices, people, installed
+software, tickets).
+
+## Threat model
+
+Treat everything the model sends as untrusted input. It may have read a
+malicious ticket title, a poisoned web page or a crafted email, and its tool
+arguments can carry whatever that content asked for. A system prompt that says
+"never read the password column" is a request, not an access control. So every
+restriction here is enforced in code or in the database, and each one is
+covered by a test:
+
+- **No free-form SQL is reachable by the model.** Every tool maps to one
+  static, reviewed statement. Arguments are only ever bind parameters.
+- **Password and secret columns are excluded by construction.** They are
+  rejected in the catalog at startup, stripped from results at runtime, and not
+  granted to the database role.
+- **The table allowlist is checked in code, not described in a prompt.** A
+  catalog entry that touches a table outside the allowlist stops the server
+  from starting.
+
+## Defense layers
+
+```mermaid
+flowchart TD
+    S["Startup: validateCatalog()"] -.->|must pass before the server is built| T
+    M["Model: tools/call"] --> T{"Tool in the catalog?"}
+    T -- no --> R1["Refused"]
+    T -- yes --> V{"Strict zod schema:<br/>bounded fields, no unknown keys"}
+    V -- invalid --> R2["Refused, executor never called"]
+    V -- valid --> P["params() builds $1..$n bind values"]
+    P --> X["PgExecutor: BEGIN READ ONLY,<br/>SET LOCAL statement_timeout,<br/>static SQL ending in LIMIT, COMMIT"]
+    X --> DB[("PostgreSQL as mcp_readonly:<br/>table and column grants")]
+    DB --> C["Row cap, then projection onto declared<br/>columns; sensitive keys dropped"]
+    C --> OUT["JSON text to the model"]
+    X -- error --> E["Generic error to the model,<br/>details to the audit log"]
+```
+
+1. **Fixed catalog** ([src/catalog.ts](src/catalog.ts)). One MCP tool per
+   entry. There is no generic query tool and no parameter named `sql`,
+   `query` or `statement`.
+2. **Input validation.** Each entry has a `z.strictObject` schema. Unknown
+   keys are rejected. Every string has a maximum length and usually a pattern
+   (hostnames: `^[A-Za-z0-9-]{1,63}$`), every number has explicit bounds,
+   `limit` is 1..100. Search text is matched with `ILIKE ... ESCAPE '\'` after
+   escaping `%` and `_`, so the model cannot turn a search into a wildcard
+   dump.
+3. **Startup catalog validation** ([src/validateCatalog.ts](src/validateCatalog.ts)).
+   Before the server is created, every entry is checked (see
+   [What the validator rejects](#what-the-validator-rejects)). One bad entry
+   means the process exits.
+4. **Read-only execution** ([src/executor.ts](src/executor.ts)). Every call
+   runs as `BEGIN READ ONLY`, a transaction-local `statement_timeout` (default
+   5 s), the statement, then `COMMIT`, or `ROLLBACK` on any error. Every
+   statement must end in `LIMIT`, and at most 100 rows leave the server.
+5. **Output projection.** Each row is rebuilt from the entry's declared column
+   list. Undeclared keys are dropped. Keys matching the sensitive pattern are
+   dropped at any depth, including inside JSON values, even if declared. Drops
+   are recorded in the audit log.
+6. **Database role** ([db/roles.sql](db/roles.sql)). `mcp_readonly` has
+   `SELECT` on the allowlisted tables only, column-level `SELECT` on `people`
+   that leaves out `password_hash` and `mfa_secret`, nothing on `api_tokens`,
+   and no `CREATE` or `TEMP`. The code layers do not rely on this, and the
+   integration tests check it separately.
+
+Database errors reach the model as a generic message. The SQLSTATE and message
+go to the audit log: JSON lines on stderr, because stdout is the MCP stdio
+channel.
+
+```json
+{"ts":"2026-09-25T16:30:15.850Z","event":"tool_call","tool":"find_people","args":{"name_or_email":"rivera","limit":25},"rowCount":1,"durationMs":3.1,"outcome":"ok","truncated":false}
+```
+
+## Tools
+
+| Tool | Parameters | Returns |
+| --- | --- | --- |
+| `list_sites` | none | code, name, city, count of non-retired devices |
+| `search_devices` | `site?`, `status?` (online/offline/retired), `os_contains?` (1-40), `limit` | hostname, site, os, status, ip, last_seen_at |
+| `get_device` | `hostname` | device, site, and the assigned person's name and email |
+| `find_people` | `name_or_email` (2-80), `limit` | full_name, email, department, site |
+| `device_software` | `hostname`, `name_contains?` (1-60), `limit` | name, version, installed_at |
+| `stale_devices` | `days` (1-365, default 30), `site?`, `limit` | non-retired devices not seen for `days` or never |
+| `open_tickets` | `site?`, `priority?` (low/medium/high/critical), `limit` | ticket_id, title, priority, status, site, hostname, opened_at |
+
+`site` is a site code such as `north-branch`. `limit` is 1-100, default 25.
+All tools are annotated `readOnlyHint: true`.
+
+## Quick start
+
+Requirements: Node.js 20.19 or later, and Docker for the local database.
+
+```bash
+docker compose up -d          # postgres:16 with db/schema.sql, roles.sql, seed.sql
+npm ci
+npm run build
+```
+
+The server reads its settings from environment variables and does not load
+`.env` files. [.env.example](.env.example) lists them, and the MCP client
+passes them (see below). Always connect as `mcp_readonly`, never as the owner.
+At startup the server logs a `privilege_warning` if the role is a superuser or
+can write.
+
+| Variable | Default | |
+| --- | --- | --- |
+| `DATABASE_URL` | required | e.g. `postgres://mcp_readonly:mcp_readonly_dev@localhost:5432/inventory` |
+| `STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout inside each transaction |
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport stdio guarded-sql \
+  --env DATABASE_URL=postgres://mcp_readonly:mcp_readonly_dev@localhost:5432/inventory \
+  -- node /absolute/path/to/guarded-sql-mcp/dist/index.js
+```
+
+**Claude Desktop** (or any client that takes an `mcpServers` block):
+
+```json
+{
+  "mcpServers": {
+    "guarded-sql": {
+      "command": "node",
+      "args": ["/absolute/path/to/guarded-sql-mcp/dist/index.js"],
+      "env": {
+        "DATABASE_URL": "postgres://mcp_readonly:mcp_readonly_dev@localhost:5432/inventory"
+      }
+    }
+  }
+}
+```
+
+The password in `db/roles.sql` and the compose file is for local development.
+Anywhere else, set a real one with `ALTER ROLE mcp_readonly PASSWORD '...'`.
+
+## Adding a query
+
+Add an entry with `defineQuery` in [src/catalog.ts](src/catalog.ts) and append
+it to `CATALOG`:
+
+```ts
+export const devicesByPerson = defineQuery({
+  name: 'devices_by_person',
+  title: 'Devices by person',
+  description: 'List devices assigned to a person, by exact email address.',
+  input: z.strictObject({
+    email: z.string().max(120).regex(/^[^\s@]+@[^\s@]+$/),
+    limit,
+  }),
+  sql: `
+    SELECT d.hostname, d.os, d.status
+    FROM devices d
+    JOIN people p ON p.id = d.assigned_person_id
+    WHERE lower(p.email) = lower($1)
+    ORDER BY d.hostname
+    LIMIT $2`,
+  params: (i) => [i.email, i.limit],
+  tables: ['devices', 'people'],
+  columns: ['hostname', 'os', 'status'],
+  example: { email: 'sam.rivera@example.com' },
+});
+```
+
+If the query needs a table or column the role cannot read, update
+`db/roles.sql` as well. The integration suite runs every entry's `example`
+against the seeded database and expects rows back.
+
+### What the validator rejects
+
+| Rule | Example |
+| --- | --- |
+| `table-not-allowed` | Declares or reads `api_tokens` or any table outside `ALLOWED_TABLES` |
+| `table-undeclared`, `table-unreferenced` | SQL reads a table missing from `tables`, or `tables` lists one the SQL never reads |
+| `unsupported-table-ref` | Comma joins, schema-qualified or quoted names, `TABLE x`, `LATERAL`, anything after `FROM` it cannot verify |
+| `sensitive-column`, `sensitive-identifier` | A declared column, or any identifier in the SQL, matching `/pass(word)?\|hash\|secret\|token\|api[_-]?key\|salt\|mfa\|otp/i` (so `password_hash AS note` fails too) |
+| `not-select`, `multi-statement` | Anything that does not start with `SELECT`/`WITH`; any `;` |
+| `write-keyword`, `forbidden-function` | `INSERT`/`UPDATE`/`DELETE` in a CTE, `SELECT INTO`, `FOR UPDATE`/`FOR SHARE`, `pg_sleep`, `set_config`, `query_to_xml` and similar |
+| `wildcard-select` | `SELECT *` or `alias.*` (`count(*)` is fine) |
+| `missing-limit` | No trailing `LIMIT`, or a literal limit above the row cap |
+| `unsupported-syntax` | Comments, dollar quoting, unbalanced quotes |
+| `placeholder-gap`, `param-count`, `param-undefined` | `$1, $3` without `$2`; `params()` length differs from the highest placeholder; an optional input mapped to `undefined` instead of `null` |
+| `non-strict-input`, `unbounded-input`, `forbidden-param-name` | `z.object` instead of `z.strictObject`; a string without `max`, a number without both bounds, nested objects or arrays; a parameter named like `sql`, `query`, `statement` |
+| `invalid-example`, `duplicate-name`, `invalid-name`, `no-columns` | Self-explanatory |
+
+## Testing
+
+```bash
+npm run typecheck          # tsc --noEmit, strict
+npm test                   # unit + protocol tests, no database needed
+npm run build && npm run smoke   # start dist/index.js over stdio and check tools/list
+npm run test:integration   # needs DATABASE_URL (as mcp_readonly); skipped otherwise
+```
+
+What each suite shows:
+
+- **Unit: validator** (`test/unit/validateCatalog.test.ts`). The real catalog
+  passes. For each rule above, a small inline catalog that breaks it is
+  rejected, including `FROM a JOIN b` with no alias and a sensitive column
+  behind an innocent alias.
+- **Unit: inputs** (`test/unit/inputs.test.ts`). Out-of-range limits, bad
+  hostnames such as `x'; DROP TABLE devices;--`, overlong and control-character
+  strings, unknown keys like `sql` are all rejected. `%` and `_` are escaped,
+  and every `ILIKE` has a matching `ESCAPE '\'`.
+- **Unit: executor** (`test/unit/executor.test.ts`). Projection keeps only
+  declared columns and drops sensitive keys at any depth. The row cap holds
+  when the executor returns 500 rows. Arguments reach the executor only as
+  bind parameters. Against a recording fake pool, `PgExecutor` issues
+  `BEGIN READ ONLY`, the timeout, the query, `COMMIT`, and `ROLLBACK` on error.
+- **Protocol** (`test/protocol/server.test.ts`). A real SDK `Client` connects
+  over `InMemoryTransport`. `tools/list` is exactly the catalog, and every
+  schema is closed and bounded. Invalid arguments and unknown tools are refused
+  before the executor runs. When a fake executor returns `password_hash`,
+  `mfa_secret` and `token_hash`, none of them reaches the client. Database
+  errors come back generic.
+- **Integration** (`test/integration/database.test.ts`). Runs against
+  PostgreSQL loaded with `db/*.sql`, connected as `mcp_readonly`. Every tool
+  returns rows with no sensitive keys and none of the seeded secret values.
+  Writes through the executor fail with `25006` (read-only transaction), and
+  the timeout cancels `pg_sleep`. The role gets `42501` on `api_tokens`, on
+  `people.password_hash`, and on `SELECT *` or `row_to_json(p)` from `people`.
+  Injection-looking inputs return zero rows, not errors.
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs typecheck, tests,
+build and the stdio smoke test on Node 20 and 22. It also runs the integration
+suite against a `postgres:16` service, with `REQUIRE_INTEGRATION=1` so a
+missing database fails the job instead of skipping it.
+
+## Limitations and non-goals
+
+- **Not a general SQL tool.** If a question is not covered by the catalog, the
+  answer is a new reviewed entry, not a more flexible tool.
+- **PostgreSQL only.** The pattern works for SQL Server too, but this
+  repository does not implement it.
+- **The validator is a guard, not a parser.** It uses regular expressions over
+  a small catalog that humans review, and it fails closed on constructs it
+  cannot verify (`EXTRACT(x FROM y)`, `IS DISTINCT FROM`, comma joins). Never
+  use it to vet SQL from a user or a model. It also cannot see whole-row
+  references such as `SELECT p FROM people p`. The column grants catch those,
+  and the integration tests show it.
+- **Projection works on names, not content.** It removes keys that look
+  sensitive. It cannot know whether an innocently named column holds a secret.
+- **Tool output is untrusted too.** Names, emails and ticket titles are
+  returned to the model by design, and a ticket title can itself contain a
+  prompt injection. This server does not sanitize content. The client must
+  treat tool results as data.
+- **Refused calls are not audited.** The SDK answers calls with invalid
+  arguments or unknown tool names before the handler runs, so they do not
+  appear in the audit log. Calls that pass validation are always logged.
+- **No per-user authorization.** It is a local stdio server. Whoever can
+  start it gets the database role's access.
+
+## Provenance
+
+This is a public reimplementation of a pattern I use in five internal,
+closed-source MCP servers that expose PostgreSQL and SQL Server to LLM agents.
+None of that code is here. This repository was written from scratch with a
+fictional schema and data, so that the approach and the tests behind it can be
+read in full.
+
+## License
+
+[MIT](LICENSE) © Thiago Langone
