@@ -1,0 +1,27 @@
+# Local PostgreSQL 16 with the fictional inventory schema, the mcp_readonly
+# role and seed data. The init scripts run once, on first start with an empty
+# volume, in file-name order. To re-run them: docker compose down -v
+#
+# Credentials here are for local development only.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: inventory
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/roles.sql:/docker-entrypoint-initdb.d/02-roles.sql:ro
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inventory"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:
