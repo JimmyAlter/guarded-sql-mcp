@@ -1,5 +1,7 @@
 # guarded-sql-mcp
 
+[![CI](https://github.com/JimmyAlter/guarded-sql-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/JimmyAlter/guarded-sql-mcp/actions/workflows/ci.yml)
+
 An MCP server that gives an LLM agent read access to a PostgreSQL database
 through a fixed catalog of parameterized queries. The model can pick a query
 and fill in bounded parameters. It cannot write SQL, and it cannot reach tables
