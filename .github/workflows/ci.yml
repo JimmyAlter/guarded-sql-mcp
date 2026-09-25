@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck, unit and protocol tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Smoke test over stdio (tools/list against the built server)
+        run: npm run smoke
+
+  integration:
+    name: Integration tests (PostgreSQL 16, as mcp_readonly)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: inventory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d inventory"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Load schema, role and seed data (as the database owner)
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: inventory
+        run: |
+          for file in schema roles seed; do
+            psql -v ON_ERROR_STOP=1 --no-psqlrc -f "db/${file}.sql"
+          done
+      - name: Integration tests (connected as mcp_readonly)
+        env:
+          DATABASE_URL: postgres://mcp_readonly:mcp_readonly_dev@localhost:5432/inventory
+          REQUIRE_INTEGRATION: "1"
+        run: npm run test:integration
