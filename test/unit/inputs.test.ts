@@ -114,7 +114,7 @@ describe('LIKE escaping', () => {
 
   it('is applied by params(), so % and _ from the model match literally', () => {
     const input = findPeople.input.parse({ name_or_email: '%_' });
-    expect(findPeople.params(input)).toEqual(['%\\%\\_%', 25]);
+    expect(findPeople.params(input)).toEqual(['%\\%\\_%', 26]);
   });
 
   it('every ILIKE in the catalog declares ESCAPE with a single backslash', () => {

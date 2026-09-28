@@ -53,6 +53,28 @@ export function containsPattern(value: string): string {
 
 const optional = <T>(value: T | undefined): T | null => value ?? null;
 
+/**
+ * The number of rows a tool call returns at most: the input's `limit` when the
+ * entry has one, capped at `maxRows`.
+ */
+export function rowLimit(input: unknown, maxRows: number = MAX_ROWS): number {
+  const requested =
+    typeof input === 'object' && input !== null && 'limit' in input && typeof input.limit === 'number'
+      ? input.limit
+      : maxRows;
+  return Math.min(requested, maxRows);
+}
+
+/**
+ * The value to bind to a statement's trailing `LIMIT $n`: one row more than the
+ * caller asked for, so the executor can tell "exactly N rows" from "more than
+ * N rows" and report `hasMore`. The extra row is never returned. The startup
+ * validator checks that every entry binds this value.
+ */
+export function fetchLimit(limit: number): number {
+  return limit + 1;
+}
+
 // ---------------------------------------------------------------------------
 // Input building blocks. Every string has a max length (and usually a pattern),
 // every number has explicit bounds. The validator rejects unbounded fields.
@@ -111,8 +133,8 @@ export const listSites = defineQuery({
     LEFT JOIN devices d ON d.site_id = s.id AND d.status <> 'retired'
     GROUP BY s.id, s.code, s.name, s.city
     ORDER BY s.name
-    LIMIT 100`,
-  params: () => [],
+    LIMIT $1`,
+  params: () => [fetchLimit(MAX_ROWS)],
   tables: ['sites', 'devices'],
   columns: ['code', 'name', 'city', 'active_devices'],
   example: {},
@@ -142,7 +164,7 @@ export const searchDevices = defineQuery({
     optional(i.site),
     optional(i.status),
     i.os_contains === undefined ? null : containsPattern(i.os_contains),
-    i.limit,
+    fetchLimit(i.limit),
   ],
   tables: ['devices', 'sites'],
   columns: ['hostname', 'site', 'os', 'status', 'ip', 'last_seen_at'],
@@ -195,7 +217,7 @@ export const findPeople = defineQuery({
     WHERE p.full_name ILIKE $1 ESCAPE '\\' OR p.email ILIKE $1 ESCAPE '\\'
     ORDER BY p.full_name
     LIMIT $2`,
-  params: (i) => [containsPattern(i.name_or_email), i.limit],
+  params: (i) => [containsPattern(i.name_or_email), fetchLimit(i.limit)],
   tables: ['people', 'sites'],
   columns: ['full_name', 'email', 'department', 'site'],
   example: { name_or_email: 'rivera' },
@@ -221,7 +243,7 @@ export const deviceSoftware = defineQuery({
   params: (i) => [
     i.hostname,
     i.name_contains === undefined ? null : containsPattern(i.name_contains),
-    i.limit,
+    fetchLimit(i.limit),
   ],
   tables: ['software_installs', 'devices'],
   columns: ['name', 'version', 'installed_at'],
@@ -247,7 +269,7 @@ export const staleDevices = defineQuery({
       AND ($2::text IS NULL OR s.code = $2)
     ORDER BY d.last_seen_at NULLS FIRST, d.hostname
     LIMIT $3`,
-  params: (i) => [i.days, optional(i.site), i.limit],
+  params: (i) => [i.days, optional(i.site), fetchLimit(i.limit)],
   tables: ['devices', 'sites'],
   columns: ['hostname', 'site', 'os', 'status', 'last_seen_at'],
   example: { days: 30 },
@@ -273,7 +295,7 @@ export const openTickets = defineQuery({
       AND ($2::text IS NULL OR t.priority::text = $2)
     ORDER BY t.priority DESC, t.opened_at
     LIMIT $3`,
-  params: (i) => [optional(i.site), optional(i.priority), i.limit],
+  params: (i) => [optional(i.site), optional(i.priority), fetchLimit(i.limit)],
   tables: ['tickets', 'sites', 'devices'],
   columns: ['ticket_id', 'title', 'priority', 'status', 'site', 'hostname', 'opened_at'],
   example: {},

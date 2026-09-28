@@ -15,7 +15,8 @@ export interface ToolCallRecord {
   readonly rowCount: number;
   readonly durationMs: number;
   readonly outcome: 'ok' | 'error';
-  readonly truncated?: boolean;
+  /** More rows matched than were returned. */
+  readonly hasMore?: boolean;
   /** Keys removed by output projection. Sensitive drops indicate a catalog or schema problem. */
   readonly dropped?: { readonly undeclared: readonly string[]; readonly sensitive: readonly string[] };
   /** Internal error details. Never sent to the model. */

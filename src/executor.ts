@@ -3,7 +3,7 @@
  * the output projection applied to every result before it leaves the server.
  */
 import pg from 'pg';
-import type { CatalogEntry } from './catalog.js';
+import { rowLimit, type CatalogEntry } from './catalog.js';
 import { DEFAULT_STATEMENT_TIMEOUT_MS, MAX_ROWS, SENSITIVE_COLUMN_PATTERN } from './policy.js';
 
 export type Row = Record<string, unknown>;
@@ -179,13 +179,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 export interface QueryOutcome {
   readonly rows: Row[];
   readonly rowCount: number;
-  /** True when the executor returned more than the row cap and the rest was discarded. */
-  readonly truncated: boolean;
+  /**
+   * True when more rows matched than were returned. Every catalog statement
+   * fetches one row beyond the limit (see fetchLimit) to find this out.
+   */
+  readonly hasMore: boolean;
   readonly dropped: DroppedKeys;
 }
 
 /**
- * Validates input, binds parameters, executes, caps and projects. The input is
+ * Validates input, binds parameters, executes, caps at the requested limit and projects. The input is
  * parsed here even though the MCP layer already validated it, so no caller can
  * reach the database with unvalidated arguments.
  */
@@ -197,7 +200,8 @@ export async function runQuery(
 ): Promise<QueryOutcome> {
   const input = entry.input.parse(args);
   const params = entry.params(input);
+  const limit = rowLimit(input, maxRows);
   const raw = await executor.query(entry.sql, params);
-  const { rows, dropped } = projectRows(raw.slice(0, maxRows), entry.columns);
-  return { rows, rowCount: rows.length, truncated: raw.length > maxRows, dropped };
+  const { rows, dropped } = projectRows(raw.slice(0, limit), entry.columns);
+  return { rows, rowCount: rows.length, hasMore: raw.length > limit, dropped };
 }

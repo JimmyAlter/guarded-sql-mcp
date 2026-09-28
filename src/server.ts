@@ -71,10 +71,10 @@ export function createServer(executor: Executor, options: ServerOptions = {}): M
         rowCount: result.rowCount,
         durationMs: elapsedMs(started),
         outcome: 'ok',
-        truncated: result.truncated,
+        hasMore: result.hasMore,
         ...(hasDrops ? { dropped: result.dropped } : {}),
       });
-      const body = { rowCount: result.rowCount, truncated: result.truncated, rows: result.rows };
+      const body = { rowCount: result.rowCount, hasMore: result.hasMore, rows: result.rows };
       return { content: [{ type: 'text', text: JSON.stringify(body) }] };
     } catch (err) {
       // Database errors can name tables, columns, constraints or values. The

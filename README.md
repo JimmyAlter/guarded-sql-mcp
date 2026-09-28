@@ -62,6 +62,8 @@ flowchart TD
    runs as `BEGIN READ ONLY`, a transaction-local `statement_timeout` (default
    5 s), the statement, then `COMMIT`, or `ROLLBACK` on any error. Every
    statement must end in `LIMIT`, and at most 100 rows leave the server.
+   The `LIMIT` is bound to one row more than requested, so a result can say
+   `hasMore: true` when more rows matched than were returned.
 5. **Output projection.** Each row is rebuilt from the entry's declared column
    list. Undeclared keys are dropped. Keys matching the sensitive pattern are
    dropped at any depth, including inside JSON values, even if declared. Drops
@@ -77,7 +79,7 @@ go to the audit log: JSON lines on stderr, because stdout is the MCP stdio
 channel.
 
 ```json
-{"ts":"2026-09-25T16:30:15.850Z","event":"tool_call","tool":"find_people","args":{"name_or_email":"rivera","limit":25},"rowCount":1,"durationMs":3.1,"outcome":"ok","truncated":false}
+{"ts":"2026-09-25T16:30:15.850Z","event":"tool_call","tool":"find_people","args":{"name_or_email":"rivera","limit":25},"rowCount":1,"durationMs":3.1,"outcome":"ok","hasMore":false}
 ```
 
 ## Tools
@@ -164,7 +166,7 @@ export const devicesByPerson = defineQuery({
     WHERE lower(p.email) = lower($1)
     ORDER BY d.hostname
     LIMIT $2`,
-  params: (i) => [i.email, i.limit],
+  params: (i) => [i.email, fetchLimit(i.limit)],
   tables: ['devices', 'people'],
   columns: ['hostname', 'os', 'status'],
   example: { email: 'sam.rivera@example.com' },
@@ -187,6 +189,7 @@ against the seeded database and expects rows back.
 | `write-keyword`, `forbidden-function` | `INSERT`/`UPDATE`/`DELETE` in a CTE, `SELECT INTO`, `FOR UPDATE`/`FOR SHARE`, `pg_sleep`, `set_config`, `query_to_xml` and similar |
 | `wildcard-select` | `SELECT *` or `alias.*` (`count(*)` is fine) |
 | `missing-limit` | No trailing `LIMIT`, or a literal limit above the row cap |
+| `limit-lookahead` | A trailing `LIMIT $n` not bound to `fetchLimit(limit)` (limit + 1), which would make `hasMore` always false |
 | `unsupported-syntax` | Comments, dollar quoting, unbalanced quotes |
 | `placeholder-gap`, `param-count`, `param-undefined` | `$1, $3` without `$2`; `params()` length differs from the highest placeholder; an optional input mapped to `undefined` instead of `null` |
 | `non-strict-input`, `unbounded-input`, `forbidden-param-name` | `z.object` instead of `z.strictObject`; a string without `max`, a number without both bounds, nested objects or arrays; a parameter named like `sql`, `query`, `statement` |

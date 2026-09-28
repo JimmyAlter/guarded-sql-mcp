@@ -15,7 +15,7 @@
  * and the database role only has column-level SELECT on what it needs.
  */
 import { z } from 'zod';
-import type { CatalogEntry } from './catalog.js';
+import { fetchLimit, rowLimit, type CatalogEntry } from './catalog.js';
 import {
   ALLOWED_TABLES,
   FREEFORM_PARAMETER_PATTERN,
@@ -46,7 +46,8 @@ export type RuleId =
   | 'invalid-example'
   | 'placeholder-gap'
   | 'param-count'
-  | 'param-undefined';
+  | 'param-undefined'
+  | 'limit-lookahead';
 
 export interface CatalogProblem {
   readonly query: string;
@@ -153,7 +154,7 @@ export function validateCatalog(
     checkSql(entry, policy, report);
     checkColumns(entry, policy, report);
     checkInput(entry, report);
-    checkParams(entry, report);
+    checkParams(entry, policy, report);
   }
 
   if (problems.length > 0) {
@@ -338,7 +339,7 @@ function boundProblem(prop: JsonSchemaProperty): string | undefined {
   }
 }
 
-function checkParams(entry: CatalogEntry, report: Report): void {
+function checkParams(entry: CatalogEntry, policy: CatalogPolicy, report: Report): void {
   const parsed = entry.input.safeParse(entry.example);
   if (!parsed.success) {
     report('invalid-example', `example does not satisfy the input schema: ${parsed.error.message}`);
@@ -374,4 +375,18 @@ function checkParams(entry: CatalogEntry, report: Report): void {
       report('param-undefined', `param $${index + 1} is undefined; map absent optional input to null`);
     }
   });
+
+  // A trailing `LIMIT $n` must fetch one row more than the call returns, or
+  // hasMore can never be reported. Checked on the example input.
+  const limitPlaceholder = TRAILING_LIMIT.exec(stripStringLiterals(entry.sql).trim())?.[1];
+  if (limitPlaceholder?.startsWith('$')) {
+    const bound = params[Number(limitPlaceholder.slice(1)) - 1];
+    const expected = fetchLimit(rowLimit(parsed.data, policy.maxRows));
+    if (bound !== expected) {
+      report(
+        'limit-lookahead',
+        `LIMIT ${limitPlaceholder} is bound to ${String(bound)} for the example; expected ${expected} (use fetchLimit())`,
+      );
+    }
+  }
 }

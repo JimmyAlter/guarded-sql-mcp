@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { CATALOG, type CatalogEntry } from '../../src/catalog.js';
+import { CATALOG, fetchLimit, type CatalogEntry } from '../../src/catalog.js';
 import { CatalogValidationError, validateCatalog, type RuleId } from '../../src/validateCatalog.js';
 
 const limitField = z.number().int().min(1).max(100).default(10);
@@ -12,7 +12,7 @@ const good: CatalogEntry = {
   description: 'A valid entry used as the base for bad variants.',
   input: z.strictObject({ limit: limitField }),
   sql: 'SELECT s.code, s.name FROM sites s ORDER BY s.code LIMIT $1',
-  params: (i) => [i.limit],
+  params: (i) => [fetchLimit(Number(i.limit))],
   tables: ['sites'],
   columns: ['code', 'name'],
   example: {},
@@ -179,7 +179,7 @@ describe('validateCatalog', () => {
       const entry = variant({
         input: z.strictObject({ id: z.number().int().min(1).max(10), limit: limitField }),
         sql: 'SELECT s.code, s.name FROM sites s WHERE s.id = $3 LIMIT $1',
-        params: (i) => [i.limit, null, i.id],
+        params: (i) => [fetchLimit(Number(i.limit)), null, i.id],
         example: { id: 1 },
       });
       expect(rulesOf([entry])).toEqual(['placeholder-gap']);
@@ -191,7 +191,7 @@ describe('validateCatalog', () => {
     });
 
     it('rejects params() returning more values than placeholders', () => {
-      const entry = variant({ params: (i) => [i.limit, 'extra'] });
+      const entry = variant({ params: (i) => [fetchLimit(Number(i.limit)), 'extra'] });
       expect(rulesOf([entry])).toEqual(['param-count']);
     });
 
@@ -199,9 +199,21 @@ describe('validateCatalog', () => {
       const entry = variant({
         input: z.strictObject({ city: z.string().max(40).optional(), limit: limitField }),
         sql: 'SELECT s.code, s.name FROM sites s WHERE ($1::text IS NULL OR s.city = $1) LIMIT $2',
-        params: (i) => [i.city, i.limit],
+        params: (i) => [i.city, fetchLimit(Number(i.limit))],
       });
       expect(rulesOf([entry])).toEqual(['param-undefined']);
+    });
+
+    it('rejects a LIMIT bound to the requested limit instead of limit + 1 (hasMore could never be true)', () => {
+      expect(rulesOf([variant({ params: (i) => [i.limit] })])).toEqual(['limit-lookahead']);
+    });
+
+    it('rejects a LIMIT placeholder bound to a fixed value that ignores the input', () => {
+      expect(rulesOf([variant({ params: () => [101] })])).toEqual(['limit-lookahead']);
+    });
+
+    it('accepts a literal LIMIT within the row cap (single-row lookups)', () => {
+      expect(rulesOf([variant({ ...noInput, sql: 'SELECT s.code, s.name FROM sites s LIMIT 1' })])).toEqual([]);
     });
 
     it('rejects an example that does not satisfy the input schema', () => {

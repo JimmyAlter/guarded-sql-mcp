@@ -116,6 +116,18 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL, connected as mcp_readonly', () => {
       expect(text).not.toMatch(SEEDED_SECRETS);
     });
 
+    it('reports hasMore only when more rows matched than the limit', async () => {
+      expect((await call('find_people', { name_or_email: 'example.com', limit: 1 })).body).toMatchObject({
+        rowCount: 1,
+        hasMore: true,
+      });
+      expect((await call('find_people', { name_or_email: 'example.com', limit: 9 })).body).toMatchObject({
+        rowCount: 9,
+        hasMore: false,
+      });
+      expect((await call('list_sites', {})).body).toMatchObject({ rowCount: 3, hasMore: false });
+    });
+
     it('find_people treats % and _ as literal characters', async () => {
       expect((await call('find_people', { name_or_email: '__' })).body!.rowCount).toBe(0);
       expect((await call('find_people', { name_or_email: '%%' })).body!.rowCount).toBe(0);

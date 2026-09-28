@@ -129,7 +129,7 @@ describe('argument handling', () => {
     const { client } = await connect(executor);
     await client.callTool({ name: 'find_people', arguments: { name_or_email: "o'brien%" } });
     const findPeople = CATALOG.find((q) => q.name === 'find_people')!;
-    expect(executor.calls).toEqual([{ sql: findPeople.sql, params: ["%o'brien\\%%", 25] }]);
+    expect(executor.calls).toEqual([{ sql: findPeople.sql, params: ["%o'brien\\%%", 26] }]);
   });
 });
 
@@ -156,7 +156,7 @@ describe('results', () => {
     expect(text).not.toContain('LEAKED');
     expect(JSON.parse(text)).toEqual({
       rowCount: 1,
-      truncated: false,
+      hasMore: false,
       rows: [{ full_name: 'Sam Rivera', email: 'sam.rivera@example.com', department: 'IT', site: 'north-branch' }],
     });
 
@@ -186,7 +186,7 @@ describe('results', () => {
       rowCount: 1,
       durationMs: expect.any(Number),
       outcome: 'ok',
-      truncated: false,
+      hasMore: false,
     });
   });
 
@@ -194,10 +194,10 @@ describe('results', () => {
     const executor = new FakeExecutor(() => Array.from({ length: 250 }, (_, i) => ({ hostname: `h-${i}` })));
     const { client } = await connect(executor);
     const result = await client.callTool({ name: 'search_devices', arguments: { limit: 100 } });
-    const body = JSON.parse(textOf(result)) as { rowCount: number; rows: unknown[]; truncated: boolean };
+    const body = JSON.parse(textOf(result)) as { rowCount: number; rows: unknown[]; hasMore: boolean };
     expect(body.rowCount).toBe(100);
     expect(body.rows).toHaveLength(100);
-    expect(body.truncated).toBe(true);
+    expect(body.hasMore).toBe(true);
   });
 
   it('turns database errors into a generic message; details go to the audit log only', async () => {

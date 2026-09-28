@@ -63,18 +63,36 @@ describe('projectRows', () => {
 });
 
 describe('runQuery', () => {
+  const hosts = (n: number) => Array.from({ length: n }, (_, i) => ({ hostname: `h-${i}` }));
+
   it('enforces the row cap even if the executor returns more', async () => {
-    const executor = new FakeExecutor(() => Array.from({ length: 500 }, (_, i) => ({ hostname: `h-${i}` })));
-    const result = await runQuery(executor, searchDevices, {});
+    const executor = new FakeExecutor(() => hosts(500));
+    const result = await runQuery(executor, searchDevices, { limit: 100 });
     expect(result.rowCount).toBe(100);
     expect(result.rows).toHaveLength(100);
-    expect(result.truncated).toBe(true);
+    expect(result.hasMore).toBe(true);
   });
 
-  it('honours a lower cap and reports no truncation when under it', async () => {
+  it('returns at most the requested limit, even if the executor ignores LIMIT', async () => {
+    const result = await runQuery(new FakeExecutor(() => hosts(500)), searchDevices, {});
+    expect(result.rowCount).toBe(25);
+    expect(result.hasMore).toBe(true);
+  });
+
+  it('binds limit + 1 and reports hasMore only when the extra row came back', async () => {
+    const exact = new FakeExecutor(() => hosts(10));
+    const exactResult = await runQuery(exact, searchDevices, { limit: 10 });
+    expect(exact.calls[0]!.params.at(-1)).toBe(11);
+    expect(exactResult).toMatchObject({ rowCount: 10, hasMore: false });
+
+    const oneMore = await runQuery(new FakeExecutor(() => hosts(11)), searchDevices, { limit: 10 });
+    expect(oneMore).toMatchObject({ rowCount: 10, hasMore: true });
+  });
+
+  it('honours a lower cap and reports no more rows when under it', async () => {
     const executor = new FakeExecutor(() => [{ hostname: 'a' }, { hostname: 'b' }, { hostname: 'c' }]);
     expect((await runQuery(executor, searchDevices, {}, 2)).rowCount).toBe(2);
-    expect((await runQuery(executor, searchDevices, {}, 5)).truncated).toBe(false);
+    expect((await runQuery(executor, searchDevices, {}, 5)).hasMore).toBe(false);
   });
 
   it('sends the static SQL and bound parameters, never interpolated text', async () => {
@@ -82,7 +100,7 @@ describe('runQuery', () => {
     await runQuery(executor, searchDevices, { os_contains: "50%'; DROP TABLE devices;--" });
     const [call] = executor.calls;
     expect(call!.sql).toBe(searchDevices.sql);
-    expect(call!.params).toEqual([null, null, "%50\\%'; DROP TABLE devices;--%", 25]);
+    expect(call!.params).toEqual([null, null, "%50\\%'; DROP TABLE devices;--%", 26]);
   });
 
   it('re-validates input, so invalid arguments never reach the executor', async () => {
