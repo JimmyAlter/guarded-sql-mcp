@@ -2,6 +2,7 @@
  * MCP server wiring. One tool per catalog entry and nothing else: there is no
  * tool that accepts SQL, and no code path that turns an argument into SQL text.
  */
+import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { AuditLog } from './audit.js';
@@ -12,7 +13,20 @@ import { DEFAULT_RESPONSE_LIMITS, outputSchemaFor, shapeResponse, type ResponseL
 import { validateCatalog } from './validateCatalog.js';
 
 export const SERVER_NAME = 'guarded-sql-mcp';
-export const SERVER_VERSION = '0.1.0';
+/**
+ * Read from package.json, the single source of the version. The relative path
+ * is the same from src/ (tests) and dist/ (the published build), and npm always
+ * ships package.json.
+ */
+export const SERVER_VERSION = readPackageVersion();
+
+function readPackageVersion(): string {
+  const pkg: unknown = createRequire(import.meta.url)('../package.json');
+  if (typeof pkg === 'object' && pkg !== null && 'version' in pkg && typeof pkg.version === 'string') {
+    return pkg.version;
+  }
+  throw new Error('package.json has no version');
+}
 
 export interface ServerOptions {
   readonly catalog?: readonly CatalogEntry[];

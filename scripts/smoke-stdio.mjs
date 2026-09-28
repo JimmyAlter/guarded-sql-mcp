@@ -4,7 +4,10 @@
 // placeholder DATABASE_URL is enough for this check.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { readFileSync } from 'node:fs';
 import { CATALOG } from '../dist/catalog.js';
+
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -27,7 +30,11 @@ try {
   if (JSON.stringify(got) !== JSON.stringify(want)) {
     throw new Error(`tools/list mismatch:\n  got  ${got.join(', ')}\n  want ${want.join(', ')}`);
   }
-  console.log(`server: ${client.getServerVersion()?.name} ${client.getServerVersion()?.version}`);
+  const server = client.getServerVersion();
+  if (server?.version !== pkg.version) {
+    throw new Error(`server reports version ${server?.version}, package.json says ${pkg.version}`);
+  }
+  console.log(`server: ${server.name} ${server.version}`);
   console.log(`tools/list returned ${got.length} tools: ${got.join(', ')}`);
 } catch (err) {
   console.error(`smoke test failed: ${err instanceof Error ? err.message : err}`);

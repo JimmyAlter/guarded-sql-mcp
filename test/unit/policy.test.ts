@@ -23,3 +23,13 @@ describe('policy', () => {
     expect(flagged).toEqual([]);
   });
 });
+
+describe('server identity', () => {
+  it('reports the version from package.json', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const pkg = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+    const { SERVER_VERSION } = await import('../../src/server.js');
+    expect(SERVER_VERSION).toBe(pkg.version);
+    expect(SERVER_VERSION).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
