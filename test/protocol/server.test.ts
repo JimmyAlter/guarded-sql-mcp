@@ -98,6 +98,70 @@ describe('tool listing', () => {
   });
 });
 
+describe('structured output', () => {
+  interface ObjectSchema {
+    type?: string;
+    additionalProperties?: unknown;
+    required?: string[];
+    properties?: Record<string, { type?: string; items?: ObjectSchema }>;
+  }
+
+  it('declares an output schema per tool, derived from its declared columns', async () => {
+    const { client } = await connect(new FakeExecutor());
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      const entry = CATALOG.find((q) => q.name === tool.name)!;
+      const schema = tool.outputSchema as ObjectSchema | undefined;
+      expect(schema, tool.name).toBeDefined();
+      expect(schema!.additionalProperties, tool.name).toBe(false);
+      expect(schema!.required?.sort(), tool.name).toEqual(['hasMore', 'rowCount', 'rows', 'truncated']);
+      const row = schema!.properties!['rows']!.items!;
+      expect(row.additionalProperties, tool.name).toBe(false);
+      expect(Object.keys(row.properties ?? {}), tool.name).toEqual([...entry.columns]);
+    }
+  });
+
+  it('returns structuredContent identical to the JSON text, with dates as ISO strings', async () => {
+    const seen = new Date('2026-09-01T10:00:00Z');
+    const executor = new FakeExecutor(() => [
+      { hostname: 'nb-lt-001', site: 'north-branch', os: 'Windows 11', status: 'online', ip: '10.0.0.5', last_seen_at: seen },
+      { hostname: 'nb-lt-002', site: 'north-branch', os: 'Ubuntu', status: 'offline', ip: null, last_seen_at: null },
+    ]);
+    const { client } = await connect(executor);
+    await client.listTools(); // lets the client cache and enforce the output schemas
+    const result = await client.callTool({ name: 'search_devices', arguments: { limit: 1 } });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual(JSON.parse(textOf(result)));
+    expect(result.structuredContent).toEqual({
+      rowCount: 1,
+      hasMore: true,
+      truncated: false,
+      rows: [
+        {
+          hostname: 'nb-lt-001',
+          site: 'north-branch',
+          os: 'Windows 11',
+          status: 'online',
+          ip: '10.0.0.5',
+          last_seen_at: '2026-09-01T10:00:00.000Z',
+        },
+      ],
+    });
+  });
+
+  it('returns no structuredContent on errors', async () => {
+    const { client } = await connect(
+      new FakeExecutor(() => {
+        throw new Error('boom');
+      }),
+    );
+    const result = await client.callTool({ name: 'list_sites', arguments: {} });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+  });
+});
+
 describe('argument handling', () => {
   it.each([
     ['get_device', { hostname: "x'; DROP TABLE devices;--" }],

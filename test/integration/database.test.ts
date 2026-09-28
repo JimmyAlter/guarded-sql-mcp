@@ -93,6 +93,8 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL, connected as mcp_readonly', () => {
         const { result, text, body } = await call(name, entry.example);
         expect(result.isError, text).toBeFalsy();
         expect(body!.rowCount).toBeGreaterThan(0);
+        // Validated against the tool's outputSchema by the SDK on both ends.
+        expect(result.structuredContent).toEqual(body);
 
         const keys = allKeys(body!.rows);
         expect(keys.filter(isSensitiveColumn)).toEqual([]);

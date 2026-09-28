@@ -8,7 +8,7 @@ import { AuditLog } from './audit.js';
 import { CATALOG, type CatalogEntry } from './catalog.js';
 import { runQuery, type Executor } from './executor.js';
 import { MAX_ROWS } from './policy.js';
-import { DEFAULT_RESPONSE_LIMITS, shapeResponse, type ResponseLimits } from './response.js';
+import { DEFAULT_RESPONSE_LIMITS, outputSchemaFor, shapeResponse, type ResponseLimits } from './response.js';
 import { validateCatalog } from './validateCatalog.js';
 
 export const SERVER_NAME = 'guarded-sql-mcp';
@@ -58,6 +58,9 @@ export function createServer(executor: Executor, options: ServerOptions = {}): M
         // The SDK validates arguments against this strict schema before the
         // handler runs; runQuery parses them again before touching the database.
         inputSchema: entry.input,
+        // Derived from the declared columns. Results carry the same body as
+        // structuredContent and, for older clients, as JSON text.
+        outputSchema: outputSchemaFor(entry.columns),
         annotations: TOOL_ANNOTATIONS,
       },
       (args) => callTool(entry, args),
@@ -86,7 +89,7 @@ export function createServer(executor: Executor, options: ServerOptions = {}): M
           : {}),
         ...(hasDrops ? { dropped: result.dropped } : {}),
       });
-      return { content: [{ type: 'text', text: response.text }] };
+      return { content: [{ type: 'text', text: response.text }], structuredContent: { ...response.body } };
     } catch (err) {
       // Database errors can name tables, columns, constraints or values. The
       // model gets a generic message; the details go to the audit log only.

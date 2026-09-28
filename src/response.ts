@@ -4,6 +4,7 @@
  * server: every cell becomes a JSON scalar, long strings are cut, and trailing
  * rows are dropped until the serialized body fits in the byte budget.
  */
+import { z } from 'zod';
 import type { Row } from './executor.js';
 import { DEFAULT_MAX_CELL_CHARS, DEFAULT_MAX_RESPONSE_BYTES } from './policy.js';
 
@@ -20,6 +21,22 @@ export interface ToolResultBody {
   /** The size limits changed this response: at least one cell was cut or row dropped. */
   readonly truncated: boolean;
   readonly rows: OutputRow[];
+}
+
+/**
+ * The output schema of a catalog entry, derived from its declared columns.
+ * Advertised in tools/list and checked by the SDK (and by conforming clients)
+ * against the structuredContent of every successful result.
+ */
+export function outputSchemaFor(columns: readonly string[]) {
+  const cell = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+  const row = z.strictObject(Object.fromEntries(columns.map((column) => [column, cell.optional()])));
+  return z.strictObject({
+    rowCount: z.number().int().min(0).describe('Rows in this response.'),
+    hasMore: z.boolean().describe('More rows matched than were returned.'),
+    truncated: z.boolean().describe('Long values were cut or rows dropped to fit the response size limit.'),
+    rows: z.array(row),
+  });
 }
 
 export interface ResponseLimits {

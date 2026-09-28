@@ -47,7 +47,7 @@ flowchart TD
     X --> DB[("PostgreSQL as mcp_readonly:<br/>table and column grants")]
     DB --> C["Row cap, then projection onto declared<br/>columns; sensitive keys dropped"]
     C --> SZ["Size cap: long cells cut,<br/>trailing rows dropped to fit 64 KiB"]
-    SZ --> OUT["JSON to the model"]
+    SZ --> OUT["structuredContent + JSON text to the model"]
     X -- error --> E["Generic error to the model,<br/>details to the audit log"]
 ```
 
@@ -109,6 +109,20 @@ channel.
 
 `site` is a site code such as `north-branch`. `limit` is 1-100, default 25.
 All tools are annotated `readOnlyHint: true`.
+
+Every tool declares an `outputSchema` derived from its column list, and a
+successful result carries the same body twice: as `structuredContent`
+(validated against that schema by the SDK) and as JSON text for clients that
+do not read structured output:
+
+```json
+{"rowCount":1,"hasMore":false,"truncated":false,"rows":[{"full_name":"Sam Rivera","email":"sam.rivera@example.com","department":"IT","site":"north-branch"}]}
+```
+
+`hasMore: true` means more rows matched than were returned. `truncated: true`
+means the size limits cut a value or dropped rows (see below). Cells are JSON
+scalars: strings, numbers, booleans or `null`; timestamps are ISO 8601
+strings.
 
 ## Quick start
 
@@ -245,7 +259,8 @@ What each suite shows:
   schema is closed and bounded. Invalid arguments and unknown tools are refused
   before the executor runs. When a fake executor returns `password_hash`,
   `mfa_secret` and `token_hash`, none of them reaches the client. Database
-  errors come back generic. An executor that returns 101 rows of ~1 MB each
+  errors come back generic. Each tool's `outputSchema` lists exactly its
+  columns, and `structuredContent` equals the JSON text. An executor that returns 101 rows of ~1 MB each
   produces a response under 64 KiB, flagged `truncated` and audited.
 - **Integration** (`test/integration/database.test.ts`). Runs against
   PostgreSQL loaded with `db/*.sql`, connected as `mcp_readonly`. Every tool
