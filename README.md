@@ -27,6 +27,11 @@ covered by a test:
 - **The table allowlist is checked in code, not described in a prompt.** A
   catalog entry that touches a table outside the allowlist stops the server
   from starting.
+- **A single call cannot flood the model's context.** Rows are capped at
+  100, every string cell at 1000 characters, and the whole JSON response at
+  64 KiB. Without the byte cap, one call over a few wide rows could return
+  megabytes. Anything cut is flagged `truncated: true` in the result and
+  recorded in the audit log.
 
 ## Defense layers
 
@@ -41,7 +46,8 @@ flowchart TD
     P --> X["PgExecutor: BEGIN READ ONLY,<br/>SET LOCAL statement_timeout,<br/>static SQL ending in LIMIT, COMMIT"]
     X --> DB[("PostgreSQL as mcp_readonly:<br/>table and column grants")]
     DB --> C["Row cap, then projection onto declared<br/>columns; sensitive keys dropped"]
-    C --> OUT["JSON text to the model"]
+    C --> SZ["Size cap: long cells cut,<br/>trailing rows dropped to fit 64 KiB"]
+    SZ --> OUT["JSON to the model"]
     X -- error --> E["Generic error to the model,<br/>details to the audit log"]
 ```
 
@@ -68,7 +74,14 @@ flowchart TD
    list. Undeclared keys are dropped. Keys matching the sensitive pattern are
    dropped at any depth, including inside JSON values, even if declared. Drops
    are recorded in the audit log.
-6. **Database role** ([db/roles.sql](db/roles.sql)). `mcp_readonly` has
+6. **Response size cap** ([src/response.ts](src/response.ts)). Every cell
+   becomes a JSON scalar (dates as ISO strings, JSON values serialized). String
+   cells longer than `MAX_CELL_CHARS` (default 1000) are cut and end with
+   `…[truncated N chars]`. Trailing rows are then dropped until the serialized
+   body fits `MAX_RESPONSE_BYTES` (default 64 KiB). The result carries
+   `truncated: true` and the audit record says how many cells were cut and rows
+   dropped.
+7. **Database role** ([db/roles.sql](db/roles.sql)). `mcp_readonly` has
    `SELECT` on the allowlisted tables only, column-level `SELECT` on `people`
    that leaves out `password_hash` and `mfa_secret`, nothing on `api_tokens`,
    and no `CREATE` or `TEMP`. The code layers do not rely on this, and the
@@ -79,7 +92,7 @@ go to the audit log: JSON lines on stderr, because stdout is the MCP stdio
 channel.
 
 ```json
-{"ts":"2026-09-25T16:30:15.850Z","event":"tool_call","tool":"find_people","args":{"name_or_email":"rivera","limit":25},"rowCount":1,"durationMs":3.1,"outcome":"ok","hasMore":false}
+{"ts":"2026-09-25T16:30:15.850Z","event":"tool_call","tool":"find_people","args":{"name_or_email":"rivera","limit":25},"rowCount":1,"durationMs":3.1,"outcome":"ok","hasMore":false,"truncated":false,"responseBytes":157}
 ```
 
 ## Tools
@@ -116,7 +129,9 @@ can write.
 | Variable | Default | |
 | --- | --- | --- |
 | `DATABASE_URL` | required | e.g. `postgres://mcp_readonly:mcp_readonly_dev@localhost:5432/inventory` |
-| `STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout inside each transaction |
+| `STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout inside each transaction (1-600000) |
+| `MAX_RESPONSE_BYTES` | `65536` | Upper bound on one tool result's JSON body (4096-1048576) |
+| `MAX_CELL_CHARS` | `1000` | Longest string a cell may carry before it is cut (100-100000) |
 
 **Claude Code:**
 
@@ -219,12 +234,19 @@ What each suite shows:
   when the executor returns 500 rows. Arguments reach the executor only as
   bind parameters. Against a recording fake pool, `PgExecutor` issues
   `BEGIN READ ONLY`, the timeout, the query, `COMMIT`, and `ROLLBACK` on error.
+- **Unit: response size** (`test/unit/response.test.ts`,
+  `test/unit/config.test.ts`). Long cells are cut without splitting a
+  surrogate pair, trailing rows are dropped until the body fits, escaped
+  characters are counted at their serialized size, and one over-wide row yields
+  zero rows rather than an oversized response. Out-of-range limits in the
+  environment stop the server from starting.
 - **Protocol** (`test/protocol/server.test.ts`). A real SDK `Client` connects
   over `InMemoryTransport`. `tools/list` is exactly the catalog, and every
   schema is closed and bounded. Invalid arguments and unknown tools are refused
   before the executor runs. When a fake executor returns `password_hash`,
   `mfa_secret` and `token_hash`, none of them reaches the client. Database
-  errors come back generic.
+  errors come back generic. An executor that returns 101 rows of ~1 MB each
+  produces a response under 64 KiB, flagged `truncated` and audited.
 - **Integration** (`test/integration/database.test.ts`). Runs against
   PostgreSQL loaded with `db/*.sql`, connected as `mcp_readonly`. Every tool
   returns rows with no sensitive keys and none of the seeded secret values.

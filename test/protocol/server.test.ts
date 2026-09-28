@@ -11,8 +11,8 @@ import { z } from 'zod';
 import { AuditLog } from '../../src/audit.js';
 import { CATALOG, type CatalogEntry } from '../../src/catalog.js';
 import type { Executor, Row } from '../../src/executor.js';
-import { FREEFORM_PARAMETER_PATTERN, SENSITIVE_COLUMN_PATTERN } from '../../src/policy.js';
-import { createServer } from '../../src/server.js';
+import { DEFAULT_MAX_RESPONSE_BYTES, FREEFORM_PARAMETER_PATTERN, SENSITIVE_COLUMN_PATTERN } from '../../src/policy.js';
+import { createServer, type ServerOptions } from '../../src/server.js';
 import { CatalogValidationError } from '../../src/validateCatalog.js';
 import { FakeExecutor } from '../helpers/fakeExecutor.js';
 
@@ -27,9 +27,9 @@ afterEach(async () => {
   await Promise.all(open.splice(0).map((close) => close()));
 });
 
-async function connect(executor: Executor): Promise<Harness> {
+async function connect(executor: Executor, options: Omit<ServerOptions, 'audit'> = {}): Promise<Harness> {
   const lines: string[] = [];
-  const server = createServer(executor, { audit: new AuditLog((line) => lines.push(line)) });
+  const server = createServer(executor, { ...options, audit: new AuditLog((line) => lines.push(line)) });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'protocol-test', version: '0.0.0' });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -157,6 +157,7 @@ describe('results', () => {
     expect(JSON.parse(text)).toEqual({
       rowCount: 1,
       hasMore: false,
+      truncated: false,
       rows: [{ full_name: 'Sam Rivera', email: 'sam.rivera@example.com', department: 'IT', site: 'north-branch' }],
     });
 
@@ -187,6 +188,8 @@ describe('results', () => {
       durationMs: expect.any(Number),
       outcome: 'ok',
       hasMore: false,
+      truncated: false,
+      responseBytes: Buffer.byteLength(textOf(result)),
     });
   });
 
@@ -198,6 +201,50 @@ describe('results', () => {
     expect(body.rowCount).toBe(100);
     expect(body.rows).toHaveLength(100);
     expect(body.hasMore).toBe(true);
+  });
+
+  it('keeps a response with huge rows under the byte cap, cuts long cells and audits the truncation', async () => {
+    // 100 rows of ~1 MB each: without the cap this would be a ~100 MB tool result.
+    const huge = 'x'.repeat(1_000_000);
+    const executor = new FakeExecutor(() =>
+      Array.from({ length: 101 }, (_, i) => ({ full_name: `Person ${i}`, email: huge, department: huge, site: 'hq' })),
+    );
+    const { client, auditRecords } = await connect(executor);
+    const result = await client.callTool({ name: 'find_people', arguments: { name_or_email: 'person', limit: 100 } });
+    const text = textOf(result);
+    const body = JSON.parse(text) as { rowCount: number; hasMore: boolean; truncated: boolean; rows: Array<Record<string, string>> };
+
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(DEFAULT_MAX_RESPONSE_BYTES);
+    expect(body.truncated).toBe(true);
+    expect(body.hasMore).toBe(true);
+    expect(body.rowCount).toBe(body.rows.length);
+    expect(body.rowCount).toBeGreaterThan(0);
+    expect(body.rowCount).toBeLessThan(100);
+    expect(body.rows[0]!['email']).toBe(`${'x'.repeat(1000)}…[truncated 999000 chars]`);
+    expect(body.rows[0]!['full_name']).toBe('Person 0');
+
+    const [record] = auditRecords();
+    expect(record).toMatchObject({
+      tool: 'find_people',
+      outcome: 'ok',
+      rowCount: body.rowCount,
+      hasMore: true,
+      truncated: true,
+      responseBytes: Buffer.byteLength(text),
+      truncation: { cellsTruncated: body.rowCount * 2 + (100 - body.rowCount) * 2, rowsDropped: 100 - body.rowCount },
+    });
+  });
+
+  it('applies custom response limits', async () => {
+    const executor = new FakeExecutor(() =>
+      Array.from({ length: 50 }, (_, i) => ({ hostname: `host-${i}`, os: 'o'.repeat(300) })),
+    );
+    const { client } = await connect(executor, { limits: { maxResponseBytes: 4096, maxCellChars: 100 } });
+    const text = textOf(await client.callTool({ name: 'search_devices', arguments: { limit: 50 } }));
+    const body = JSON.parse(text) as { rowCount: number; rows: Array<Record<string, string>> };
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(4096);
+    expect(body.rows[0]!['os']).toBe(`${'o'.repeat(100)}…[truncated 200 chars]`);
+    expect(body.rowCount).toBeLessThan(50);
   });
 
   it('turns database errors into a generic message; details go to the audit log only', async () => {

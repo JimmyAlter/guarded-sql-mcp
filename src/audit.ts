@@ -17,6 +17,12 @@ export interface ToolCallRecord {
   readonly outcome: 'ok' | 'error';
   /** More rows matched than were returned. */
   readonly hasMore?: boolean;
+  /** The response size limits cut a cell or dropped rows. */
+  readonly truncated?: boolean;
+  /** UTF-8 size of the JSON body sent to the model. */
+  readonly responseBytes?: number;
+  /** What the size limits removed, when truncated is true. */
+  readonly truncation?: { readonly cellsTruncated: number; readonly rowsDropped: number };
   /** Keys removed by output projection. Sensitive drops indicate a catalog or schema problem. */
   readonly dropped?: { readonly undeclared: readonly string[]; readonly sensitive: readonly string[] };
   /** Internal error details. Never sent to the model. */

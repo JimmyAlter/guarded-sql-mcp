@@ -44,3 +44,22 @@ export const MAX_ROWS = 100;
 
 /** Default `statement_timeout` applied inside every transaction. */
 export const DEFAULT_STATEMENT_TIMEOUT_MS = 5_000;
+
+/**
+ * Upper bound on the serialized JSON body of one tool result, in UTF-8 bytes.
+ * A few wide rows can otherwise produce megabytes of output, which floods the
+ * model's context and the client. Rows are dropped from the end until the body
+ * fits. Configurable with MAX_RESPONSE_BYTES within the bounds below.
+ */
+export const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
+export const MAX_RESPONSE_BYTES_BOUNDS = { min: 4 * 1024, max: 1024 * 1024 } as const;
+
+/**
+ * Longest string a single cell may carry, in UTF-16 code units. Longer strings
+ * are cut and end with a marker. Configurable with MAX_CELL_CHARS.
+ */
+export const DEFAULT_MAX_CELL_CHARS = 1_000;
+export const MAX_CELL_CHARS_BOUNDS = { min: 100, max: 100_000 } as const;
+
+/** Statement timeout bounds (milliseconds). */
+export const STATEMENT_TIMEOUT_BOUNDS = { min: 1, max: 600_000 } as const;

@@ -8,6 +8,7 @@ import { AuditLog } from './audit.js';
 import { CATALOG, type CatalogEntry } from './catalog.js';
 import { runQuery, type Executor } from './executor.js';
 import { MAX_ROWS } from './policy.js';
+import { DEFAULT_RESPONSE_LIMITS, shapeResponse, type ResponseLimits } from './response.js';
 import { validateCatalog } from './validateCatalog.js';
 
 export const SERVER_NAME = 'guarded-sql-mcp';
@@ -17,6 +18,8 @@ export interface ServerOptions {
   readonly catalog?: readonly CatalogEntry[];
   readonly audit?: AuditLog;
   readonly maxRows?: number;
+  /** Response size limits. Defaults to 64 KiB per response and 1000 characters per cell. */
+  readonly limits?: ResponseLimits;
 }
 
 const TOOL_ANNOTATIONS = {
@@ -30,6 +33,7 @@ export function createServer(executor: Executor, options: ServerOptions = {}): M
   const catalog = options.catalog ?? CATALOG;
   const audit = options.audit ?? new AuditLog();
   const maxRows = options.maxRows ?? MAX_ROWS;
+  const limits = options.limits ?? DEFAULT_RESPONSE_LIMITS;
 
   // A server is never built from a catalog that has not passed validation.
   validateCatalog(catalog);
@@ -39,7 +43,9 @@ export function createServer(executor: Executor, options: ServerOptions = {}): M
     {
       instructions:
         'Read-only access to an IT asset inventory through a fixed set of queries. ' +
-        `Each tool returns at most ${maxRows} rows as JSON.`,
+        `Each tool returns at most ${maxRows} rows as JSON, and at most ${limits.maxResponseBytes} bytes. ` +
+        'hasMore: true means more rows matched than were returned; narrow the filters. ' +
+        'truncated: true means long values were cut or rows were dropped to fit the size limit.',
     },
   );
 
@@ -64,18 +70,23 @@ export function createServer(executor: Executor, options: ServerOptions = {}): M
     const started = performance.now();
     try {
       const result = await runQuery(executor, entry, args, maxRows);
+      const response = shapeResponse(result.rows, result.hasMore, limits);
       const hasDrops = result.dropped.undeclared.length > 0 || result.dropped.sensitive.length > 0;
       audit.toolCall({
         tool: entry.name,
         args,
-        rowCount: result.rowCount,
+        rowCount: response.body.rowCount,
         durationMs: elapsedMs(started),
         outcome: 'ok',
-        hasMore: result.hasMore,
+        hasMore: response.body.hasMore,
+        truncated: response.body.truncated,
+        responseBytes: response.bytes,
+        ...(response.body.truncated
+          ? { truncation: { cellsTruncated: response.cellsTruncated, rowsDropped: response.rowsDropped } }
+          : {}),
         ...(hasDrops ? { dropped: result.dropped } : {}),
       });
-      const body = { rowCount: result.rowCount, hasMore: result.hasMore, rows: result.rows };
-      return { content: [{ type: 'text', text: JSON.stringify(body) }] };
+      return { content: [{ type: 'text', text: response.text }] };
     } catch (err) {
       // Database errors can name tables, columns, constraints or values. The
       // model gets a generic message; the details go to the audit log only.
