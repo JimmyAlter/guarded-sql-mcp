@@ -130,7 +130,7 @@ strings.
 
 ## Quick start
 
-Requirements: Node.js 20.19 or later, and Docker for the local database.
+Requirements: Node.js 22 or later, and Docker for the local database.
 
 ```bash
 docker compose up -d          # postgres:16 with db/schema.sql, roles.sql, seed.sql
@@ -277,8 +277,8 @@ What each suite shows:
   `people.password_hash`, and on `SELECT *` or `row_to_json(p)` from `people`.
   Injection-looking inputs return zero rows, not errors.
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs typecheck, tests,
-build and the stdio smoke test on Node 20 and 22. It also runs the integration
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs typecheck, lint, tests,
+build and the stdio smoke test on Node 22 and 24. It also runs the integration
 suite against a `postgres:16` service, with `REQUIRE_INTEGRATION=1` so a
 missing database fails the job instead of skipping it.
 
