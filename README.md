@@ -5,7 +5,11 @@
 An MCP server that gives an LLM agent read access to a PostgreSQL database
 through a fixed catalog of parameterized queries. The model can pick a query
 and fill in bounded parameters. It cannot write SQL, and it cannot reach tables
-or columns that the catalog and the database role do not allow.
+or columns that the catalog and the database role do not allow. This is a
+public reimplementation of a pattern I use in five internal, closed-source MCP
+servers that expose PostgreSQL and SQL Server to LLM agents; none of that code
+is here. It was written from scratch, with a fictional schema and data, so that
+the approach and the tests behind it can be read in full.
 
 The schema is a fictional IT asset inventory (sites, devices, people, installed
 software, tickets).
@@ -132,10 +136,14 @@ strings.
 
 Requirements: Node.js 22 or later, and Docker for the local database.
 
+The package is not published to npm yet, so run it from a clone:
+
 ```bash
+git clone https://github.com/JimmyAlter/guarded-sql-mcp.git
+cd guarded-sql-mcp
 docker compose up -d          # postgres:16 with db/schema.sql, roles.sql, seed.sql
 npm ci
-npm run build
+npm run build                 # produces dist/index.js
 ```
 
 The server reads its settings from environment variables and does not load
@@ -176,8 +184,73 @@ claude mcp add --transport stdio guarded-sql \
 }
 ```
 
+Once the package is published to npm, `npx -y guarded-sql-mcp` will replace
+`node /absolute/path/to/guarded-sql-mcp/dist/index.js` in both snippets. Until
+then that command does not work.
+
 The password in `db/roles.sql` and the compose file is for local development.
 Anywhere else, set a real one with `ALTER ROLE mcp_readonly PASSWORD '...'`.
+
+## Demo
+
+[scripts/demo.mjs](scripts/demo.mjs) connects a real MCP SDK client to the
+built server over an in-memory transport and makes five calls. The only stand-in
+is the database: a fake executor answers every query with one fixed row copied
+from `db/seed.sql` and records whether it was called, so the output is the same
+on every run and needs no PostgreSQL. This is not an LLM session; it shows
+exactly what any MCP client, model-driven or not, gets back.
+
+```bash
+npm run build && npm run demo
+```
+
+The output below was produced by that command, unedited (audit records are
+printed without their `ts` and `durationMs` fields, which change every run).
+CI runs `node scripts/demo.mjs --check` and fails if it drifts:
+
+```text
+tools/list -> 7 tools: list_sites, search_devices, get_device, find_people, device_software, stale_devices, open_tickets
+
+## A normal call
+tools/call find_people {"name_or_email":"rivera"}
+isError: false
+text: {"rowCount":1,"hasMore":false,"truncated":false,"rows":[{"full_name":"Sam Rivera","email":"sam.rivera@example.com","department":"IT","site":"north-branch"}]}
+structuredContent equals text: true
+database reached: yes
+audit: {"event":"tool_call","tool":"find_people","args":{"name_or_email":"rivera","limit":25},"rowCount":1,"outcome":"ok","hasMore":false,"truncated":false,"responseBytes":157}
+
+## Refused: unknown key `sql`
+tools/call get_device {"hostname":"nb-lt-001","sql":"SELECT token_hash FROM api_tokens"}
+isError: true
+text: MCP error -32602: Input validation error: Invalid arguments for tool get_device: Unrecognized key: "sql"
+database reached: no
+audit: (none: refused before the handler ran)
+
+## Refused: limit above the cap
+tools/call search_devices {"limit":1000}
+isError: true
+text: MCP error -32602: Input validation error: Invalid arguments for tool search_devices: Too big: expected number to be <=100 at limit
+database reached: no
+audit: (none: refused before the handler ran)
+
+## Refused: injection-looking hostname
+tools/call get_device {"hostname":"x'; DROP TABLE devices;--"}
+isError: true
+text: MCP error -32602: Input validation error: Invalid arguments for tool get_device: hostname: 1-63 letters, digits or hyphens at hostname
+database reached: no
+audit: (none: refused before the handler ran)
+
+## Refused: a tool that does not exist
+tools/call run_sql {"sql":"SELECT 1"}
+isError: true
+text: MCP error -32602: Tool run_sql not found
+database reached: no
+audit: (none: refused before the handler ran)
+```
+
+Invalid arguments are refused by the SDK against the tool's strict schema
+before the handler runs, so they never reach the database and are not in the
+audit log (see [Limitations](#limitations-and-non-goals)).
 
 ## Adding a query
 
@@ -234,7 +307,9 @@ against the seeded database and expects rows back.
 ```bash
 npm run typecheck          # tsc --noEmit, strict
 npm test                   # unit + protocol tests, no database needed
+npm run lint               # typescript-eslint, strict-type-checked
 npm run build && npm run smoke   # start dist/index.js over stdio and check tools/list
+npm run demo               # the transcript in the Demo section (after build)
 npm run test:integration   # needs DATABASE_URL (as mcp_readonly); skipped otherwise
 ```
 
@@ -310,14 +385,6 @@ missing database fails the job instead of skipping it.
   counts and sizes.
 - **No per-user authorization.** It is a local stdio server. Whoever can
   start it gets the database role's access.
-
-## Provenance
-
-This is a public reimplementation of a pattern I use in five internal,
-closed-source MCP servers that expose PostgreSQL and SQL Server to LLM agents.
-None of that code is here. This repository was written from scratch with a
-fictional schema and data, so that the approach and the tests behind it can be
-read in full.
 
 ## License
 

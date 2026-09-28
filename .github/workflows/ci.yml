@@ -29,6 +29,8 @@ jobs:
       - run: npm run build
       - name: Smoke test over stdio (tools/list against the built server)
         run: npm run smoke
+      - name: Demo transcript in README matches scripts/demo.mjs
+        run: node scripts/demo.mjs --check
 
   integration:
     name: Integration tests (PostgreSQL 16, as mcp_readonly)
