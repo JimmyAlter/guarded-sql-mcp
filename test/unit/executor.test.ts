@@ -98,18 +98,19 @@ describe('PgExecutor', () => {
     const statements: Array<{ text: string; values: unknown[] | undefined }> = [];
     const released: Array<Error | boolean | undefined> = [];
     const pool: PoolLike = {
-      connect: async () => ({
-        query: async (text: string, values?: unknown[]) => {
-          statements.push({ text, values });
-          const error = fail(text);
-          if (error) throw error;
-          return { rows: text.startsWith('SELECT s.code') ? [{ code: 'north-branch' }] : [] };
-        },
-        release: (destroy?: Error | boolean) => {
-          released.push(destroy);
-        },
-      }),
-      end: async () => {},
+      connect: () =>
+        Promise.resolve({
+          query: (text: string, values?: unknown[]) => {
+            statements.push({ text, values });
+            const error = fail(text);
+            if (error) return Promise.reject(error);
+            return Promise.resolve({ rows: text.startsWith('SELECT s.code') ? [{ code: 'north-branch' }] : [] });
+          },
+          release: (destroy?: Error | boolean) => {
+            released.push(destroy);
+          },
+        }),
+      end: () => Promise.resolve(),
     };
     return { pool, statements, released };
   }

@@ -3,12 +3,14 @@ import { z } from 'zod';
 import { CATALOG, type CatalogEntry } from '../../src/catalog.js';
 import { CatalogValidationError, validateCatalog, type RuleId } from '../../src/validateCatalog.js';
 
+const limitField = z.number().int().min(1).max(100).default(10);
+
 /** A minimal entry that passes validation. Each bad case changes one thing. */
 const good: CatalogEntry = {
   name: 'test_query',
   title: 'Test query',
   description: 'A valid entry used as the base for bad variants.',
-  input: z.strictObject({ limit: z.number().int().min(1).max(100).default(10) }),
+  input: z.strictObject({ limit: limitField }),
   sql: 'SELECT s.code, s.name FROM sites s ORDER BY s.code LIMIT $1',
   params: (i) => [i.limit],
   tables: ['sites'],
@@ -34,7 +36,9 @@ function rulesOf(catalog: readonly CatalogEntry[]): RuleId[] {
 
 describe('validateCatalog', () => {
   it('accepts the real catalog', () => {
-    expect(() => validateCatalog(CATALOG)).not.toThrow();
+    expect(() => {
+      validateCatalog(CATALOG);
+    }).not.toThrow();
   });
 
   it('accepts the base entry used by the bad variants below', () => {
@@ -173,7 +177,7 @@ describe('validateCatalog', () => {
   describe('placeholders and params', () => {
     it('rejects a gap in placeholder numbering', () => {
       const entry = variant({
-        input: z.strictObject({ id: z.number().int().min(1).max(10), limit: good.input.shape['limit']! }),
+        input: z.strictObject({ id: z.number().int().min(1).max(10), limit: limitField }),
         sql: 'SELECT s.code, s.name FROM sites s WHERE s.id = $3 LIMIT $1',
         params: (i) => [i.limit, null, i.id],
         example: { id: 1 },
@@ -193,7 +197,7 @@ describe('validateCatalog', () => {
 
     it('rejects an optional input mapped to undefined instead of null', () => {
       const entry = variant({
-        input: z.strictObject({ city: z.string().max(40).optional(), limit: good.input.shape['limit']! }),
+        input: z.strictObject({ city: z.string().max(40).optional(), limit: limitField }),
         sql: 'SELECT s.code, s.name FROM sites s WHERE ($1::text IS NULL OR s.city = $1) LIMIT $2',
         params: (i) => [i.city, i.limit],
       });
@@ -215,7 +219,7 @@ describe('validateCatalog', () => {
       'rejects a parameter named %s',
       (key) => {
         const entry = variant({
-          input: z.strictObject({ [key]: z.string().max(10).optional(), limit: good.input.shape['limit']! }),
+          input: z.strictObject({ [key]: z.string().max(10).optional(), limit: limitField }),
         });
         expect(rulesOf([entry])).toContain('forbidden-param-name');
       },
@@ -231,7 +235,7 @@ describe('validateCatalog', () => {
 
     it.each(unbounded)('rejects %s', (_label, field) => {
       const entry = variant({
-        input: z.strictObject({ extra: field, limit: good.input.shape['limit']! }),
+        input: z.strictObject({ extra: field, limit: limitField }),
       });
       expect(rulesOf([entry])).toContain('unbounded-input');
     });

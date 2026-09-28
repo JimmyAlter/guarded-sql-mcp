@@ -70,12 +70,15 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL, connected as mcp_readonly', () => {
     closeServer = () => server.close();
   });
 
+  // beforeAll may have failed part-way, so any of these can still be unset.
+  /* eslint-disable @typescript-eslint/no-unnecessary-condition */
   afterAll(async () => {
     await mcp?.close();
     await closeServer?.();
     await executor?.close();
     await raw?.end();
   });
+  /* eslint-enable @typescript-eslint/no-unnecessary-condition */
 
   async function call(name: string, args: Record<string, unknown>) {
     const result = (await mcp.callTool({ name, arguments: args })) as CallToolResult;
@@ -87,7 +90,7 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL, connected as mcp_readonly', () => {
     it.each(CATALOG.map((entry) => [entry.name, entry] as const))(
       '%s returns rows for its example input, with only declared, non-sensitive keys',
       async (name, entry) => {
-        const { result, text, body } = await call(name, entry.example as Record<string, unknown>);
+        const { result, text, body } = await call(name, entry.example);
         expect(result.isError, text).toBeFalsy();
         expect(body!.rowCount).toBeGreaterThan(0);
 

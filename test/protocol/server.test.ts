@@ -193,7 +193,8 @@ describe('results', () => {
   it('caps rows at 100 regardless of what the executor returns', async () => {
     const executor = new FakeExecutor(() => Array.from({ length: 250 }, (_, i) => ({ hostname: `h-${i}` })));
     const { client } = await connect(executor);
-    const body = JSON.parse(textOf(await client.callTool({ name: 'search_devices', arguments: { limit: 100 } })));
+    const result = await client.callTool({ name: 'search_devices', arguments: { limit: 100 } });
+    const body = JSON.parse(textOf(result)) as { rowCount: number; rows: unknown[]; truncated: boolean };
     expect(body.rowCount).toBe(100);
     expect(body.rows).toHaveLength(100);
     expect(body.truncated).toBe(true);

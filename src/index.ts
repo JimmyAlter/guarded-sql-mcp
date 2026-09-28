@@ -29,7 +29,9 @@ async function main(): Promise<void> {
 
   const executor = PgExecutor.connect(databaseUrl, {
     statementTimeoutMs,
-    onPoolError: (err) => audit.event('pool_error', { message: err.message }),
+    onPoolError: (err) => {
+      audit.event('pool_error', { message: err.message });
+    },
   });
   const server = createServer(executor, { audit });
   await server.connect(new StdioServerTransport());
@@ -37,10 +39,12 @@ async function main(): Promise<void> {
 
   // Non-blocking: the server stays up if the database is not reachable yet.
   checkConnectedRole(executor)
-    .then((warnings) => warnings.forEach((warning) => audit.event('privilege_warning', { warning })))
-    .catch((err: unknown) =>
-      audit.event('role_check_failed', { message: err instanceof Error ? err.message : String(err) }),
-    );
+    .then((warnings) => {
+      for (const warning of warnings) audit.event('privilege_warning', { warning });
+    })
+    .catch((err: unknown) => {
+      audit.event('role_check_failed', { message: err instanceof Error ? err.message : String(err) });
+    });
 
   let closing = false;
   const shutdown = async (reason: string) => {

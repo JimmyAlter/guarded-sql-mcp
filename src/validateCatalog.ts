@@ -235,7 +235,7 @@ function checkTables(entry: CatalogEntry, sql: string, policy: CatalogPolicy, re
   const referenced = new Set<string>();
   for (const match of sql.matchAll(TABLE_REF)) {
     const ref = match[1] ?? '';
-    const rest = sql.slice((match.index ?? 0) + match[0].length);
+    const rest = sql.slice(match.index + match[0].length);
 
     if (!SIMPLE_IDENTIFIER.test(ref.toLowerCase()) || NOT_A_TABLE.test(ref)) {
       // Schema-qualified names, function calls in FROM, EXTRACT(... FROM ...),

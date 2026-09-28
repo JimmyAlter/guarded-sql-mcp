@@ -61,6 +61,7 @@ const optional = <T>(value: T | undefined): T | null => value ?? null;
 export const HOSTNAME_PATTERN = /^[A-Za-z0-9-]{1,63}$/;
 const SITE_CODE_PATTERN = /^[a-z0-9-]{2,32}$/;
 /** Printable text only. Control characters (including NUL, which Postgres rejects in text) are refused. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point of this pattern
 const PRINTABLE_PATTERN = /^[^\u0000-\u001f\u007f]*$/;
 
 const siteCode = z
