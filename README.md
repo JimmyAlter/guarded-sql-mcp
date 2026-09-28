@@ -128,7 +128,7 @@ do not read structured output:
 ```
 
 `hasMore: true` means more rows matched than were returned. `truncated: true`
-means the size limits cut a value or dropped rows (see below). Cells are JSON
+means the size limits cut a value or dropped rows (layer 6 above). Cells are JSON
 scalars: strings, numbers, booleans or `null`; timestamps are ISO 8601
 strings.
 
@@ -378,6 +378,10 @@ missing database fails the job instead of skipping it.
 - **Refused calls are not audited.** The SDK answers calls with invalid
   arguments or unknown tool names before the handler runs, so they do not
   appear in the audit log. Calls that pass validation are always logged.
+- **The byte cap is per body, and the body is sent twice.** `MAX_RESPONSE_BYTES`
+  bounds the JSON body; the same body goes out as `structuredContent` and as
+  text, so a result on the wire is at most about twice the cap plus the
+  JSON-RPC envelope.
 - **The audit log keeps arguments verbatim by default.** Search text such as
   a person's name or email in `find_people` ends up in the log as typed. Set
   `AUDIT_REDACT_ARGS=1` to log every string argument as `"[redacted]"`
