@@ -1,6 +1,6 @@
 {
   "name": "guarded-sql-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server that exposes PostgreSQL to LLM agents through a fixed catalog of parameterized, read-only queries.",
   "keywords": [
     "mcp",
