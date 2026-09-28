@@ -38,6 +38,15 @@ GRANT SELECT ON sites, devices, software_installs, tickets TO mcp_readonly;
 -- whole-row reference) fails with "permission denied".
 GRANT SELECT (id, full_name, email, department, site_id) ON people TO mcp_readonly;
 
+-- Session defaults for every connection as this role. The server already runs
+-- each call in BEGIN READ ONLY with a SET LOCAL statement_timeout; these make
+-- any other session as mcp_readonly (psql, a misconfigured client) read-only
+-- and time-bounded too. They are defaults, not grants: the role could override
+-- them with SET, which is why the grants above are still what enforces access.
+ALTER ROLE mcp_readonly SET default_transaction_read_only = on;
+ALTER ROLE mcp_readonly SET statement_timeout = '5s';
+ALTER ROLE mcp_readonly SET idle_in_transaction_session_timeout = '10s';
+
 -- api_tokens: intentionally no grant.
 --
 -- No ALTER DEFAULT PRIVILEGES either: tables created later are invisible to

@@ -84,8 +84,12 @@ flowchart TD
 7. **Database role** ([db/roles.sql](db/roles.sql)). `mcp_readonly` has
    `SELECT` on the allowlisted tables only, column-level `SELECT` on `people`
    that leaves out `password_hash` and `mfa_secret`, nothing on `api_tokens`,
-   and no `CREATE` or `TEMP`. The code layers do not rely on this, and the
-   integration tests check it separately.
+   and no `CREATE` or `TEMP`. Its sessions default to
+   `default_transaction_read_only = on`, `statement_timeout = 5s` and
+   `idle_in_transaction_session_timeout = 10s`, so even a session opened
+   outside the server (psql with the same credentials) is read-only and
+   time-bounded. The code layers do not rely on this, and the integration tests
+   check it separately.
 
 Database errors reach the model as a generic message. The SQLSTATE and message
 go to the audit log: JSON lines on stderr, because stdout is the MCP stdio
@@ -267,7 +271,9 @@ What each suite shows:
   PostgreSQL loaded with `db/*.sql`, connected as `mcp_readonly`. Every tool
   returns rows with no sensitive keys and none of the seeded secret values.
   Writes through the executor fail with `25006` (read-only transaction), and
-  the timeout cancels `pg_sleep`. The role gets `42501` on `api_tokens`, on
+  the timeout cancels `pg_sleep`. A fresh session as `mcp_readonly` shows
+  `default_transaction_read_only = on`, and writes still get `42501` inside an
+  explicit `READ WRITE` transaction. The role gets `42501` on `api_tokens`, on
   `people.password_hash`, and on `SELECT *` or `row_to_json(p)` from `people`.
   Injection-looking inputs return zero rows, not errors.
 

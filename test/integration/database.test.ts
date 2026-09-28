@@ -214,10 +214,38 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL, connected as mcp_readonly', () => {
       expect(rows).toHaveLength(1);
     });
 
-    it('cannot write even outside the server (autocommit, no READ ONLY)', async () => {
-      expect(await pgErrorCode(raw.query("UPDATE sites SET name = 'x'"))).toBe('42501');
-      expect(await pgErrorCode(raw.query('CREATE TABLE scratch (id int)'))).toBe('42501');
-      expect(await pgErrorCode(raw.query('CREATE TEMP TABLE scratch (id int)'))).toBe('42501');
+    it('has read-only sessions and bounded timeouts by default (ALTER ROLE ... SET)', async () => {
+      // A fresh session, without the executor's BEGIN READ ONLY / SET LOCAL.
+      const fresh = new pg.Client({ connectionString: DATABASE_URL });
+      await fresh.connect();
+      try {
+        const show = async (setting: string) =>
+          (await fresh.query<Record<string, string>>(`SHOW ${setting}`)).rows[0]?.[setting];
+        expect(await show('default_transaction_read_only')).toBe('on');
+        expect(await show('statement_timeout')).toBe('5s');
+        expect(await show('idle_in_transaction_session_timeout')).toBe('10s');
+        // 25006 = read_only_sql_transaction: even autocommit writes are refused.
+        expect(await pgErrorCode(fresh.query("UPDATE sites SET name = 'x'"))).toBe('25006');
+      } finally {
+        await fresh.end();
+      }
+    });
+
+    it('cannot write even in an explicit READ WRITE transaction (grants, not just the session default)', async () => {
+      // default_transaction_read_only is a default the role can override, so
+      // the grants have to hold on their own.
+      for (const sql of [
+        "UPDATE sites SET name = 'x'",
+        'CREATE TABLE scratch (id int)',
+        'CREATE TEMP TABLE scratch (id int)',
+      ]) {
+        await raw.query('BEGIN READ WRITE');
+        try {
+          expect(await pgErrorCode(raw.query(sql)), sql).toBe('42501');
+        } finally {
+          await raw.query('ROLLBACK');
+        }
+      }
     });
 
     it('passes the startup privilege check with no warnings', async () => {
