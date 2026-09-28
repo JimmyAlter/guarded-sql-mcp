@@ -7,6 +7,7 @@
  *   STATEMENT_TIMEOUT_MS  optional, default 5000
  *   MAX_RESPONSE_BYTES    optional, default 65536
  *   MAX_CELL_CHARS        optional, default 1000
+ *   AUDIT_REDACT_ARGS     optional, default off: log string arguments as "[redacted]"
  */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { AuditLog } from './audit.js';
@@ -22,7 +23,7 @@ async function main(): Promise<void> {
   validateCatalog(CATALOG);
 
   const config = loadConfig();
-  const audit = new AuditLog();
+  const audit = new AuditLog(undefined, undefined, { redactArgs: config.auditRedactArgs });
 
   const executor = PgExecutor.connect(config.databaseUrl, {
     statementTimeoutMs: config.statementTimeoutMs,
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
     statementTimeoutMs: config.statementTimeoutMs,
     maxResponseBytes: config.maxResponseBytes,
     maxCellChars: config.maxCellChars,
+    auditRedactArgs: config.auditRedactArgs,
   });
 
   // Non-blocking: the server stays up if the database is not reachable yet.

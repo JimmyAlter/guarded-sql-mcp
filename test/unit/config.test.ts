@@ -14,6 +14,7 @@ describe('loadConfig', () => {
       statementTimeoutMs: 5_000,
       maxResponseBytes: 65_536,
       maxCellChars: 1_000,
+      auditRedactArgs: false,
     });
   });
 
@@ -24,6 +25,18 @@ describe('loadConfig', () => {
   });
 
   it.each([
+    ['1', true],
+    ['true', true],
+    ['ON', true],
+    ['0', false],
+    ['off', false],
+    ['', false],
+  ])('reads AUDIT_REDACT_ARGS=%s as %s', (value, expected) => {
+    expect(loadConfig({ DATABASE_URL, AUDIT_REDACT_ARGS: value }).auditRedactArgs).toBe(expected);
+  });
+
+  it.each([
+    ['AUDIT_REDACT_ARGS', 'maybe'],
     ['STATEMENT_TIMEOUT_MS', '0'],
     ['STATEMENT_TIMEOUT_MS', '600001'],
     ['MAX_RESPONSE_BYTES', '1024'],

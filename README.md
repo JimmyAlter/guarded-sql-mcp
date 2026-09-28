@@ -146,6 +146,7 @@ can write.
 | `STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout inside each transaction (1-600000) |
 | `MAX_RESPONSE_BYTES` | `65536` | Upper bound on one tool result's JSON body (4096-1048576) |
 | `MAX_CELL_CHARS` | `1000` | Longest string a cell may carry before it is cut (100-100000) |
+| `AUDIT_REDACT_ARGS` | off | `1`/`true`/`on`: log string arguments as `"[redacted]"` in the audit log |
 
 **Claude Code:**
 
@@ -296,6 +297,11 @@ missing database fails the job instead of skipping it.
 - **Refused calls are not audited.** The SDK answers calls with invalid
   arguments or unknown tool names before the handler runs, so they do not
   appear in the audit log. Calls that pass validation are always logged.
+- **The audit log keeps arguments verbatim by default.** Search text such as
+  a person's name or email in `find_people` ends up in the log as typed. Set
+  `AUDIT_REDACT_ARGS=1` to log every string argument as `"[redacted]"`
+  (numbers such as `limit` are kept). Results are never logged, only row
+  counts and sizes.
 - **No per-user authorization.** It is a local stdio server. Whoever can
   start it gets the database role's access.
 

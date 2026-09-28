@@ -29,14 +29,37 @@ export interface ToolCallRecord {
   readonly error?: { readonly code?: string; readonly message: string };
 }
 
+export interface AuditOptions {
+  /**
+   * Replace every string argument with "[redacted]" before it is logged.
+   * Search text (for example a person's name in find_people) is personal data
+   * that the log would otherwise keep verbatim. Numbers and booleans are kept.
+   */
+  readonly redactArgs?: boolean;
+}
+
+export const REDACTED = '[redacted]';
+
+/** Returns a copy of `value` with every string, at any depth, replaced by REDACTED. */
+export function redactStrings(value: unknown): unknown {
+  if (typeof value === 'string') return REDACTED;
+  if (Array.isArray(value)) return value.map(redactStrings);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, redactStrings(inner)]));
+  }
+  return value;
+}
+
 export class AuditLog {
   constructor(
     private readonly write: LineWriter = stderrWriter,
     private readonly now: () => Date = () => new Date(),
+    private readonly options: AuditOptions = {},
   ) {}
 
   toolCall(record: ToolCallRecord): void {
-    this.emit({ event: 'tool_call', ...record });
+    const args = this.options.redactArgs === true ? redactStrings(record.args) : record.args;
+    this.emit({ event: 'tool_call', ...record, args });
   }
 
   event(event: string, data: Record<string, unknown> = {}): void {

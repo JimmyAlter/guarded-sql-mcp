@@ -17,6 +17,8 @@ export interface Config {
   readonly statementTimeoutMs: number;
   readonly maxResponseBytes: number;
   readonly maxCellChars: number;
+  /** Replace string arguments in the audit log with a placeholder. */
+  readonly auditRedactArgs: boolean;
 }
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -31,6 +33,7 @@ export function loadConfig(env: Env = process.env): Config {
     statementTimeoutMs: parseInteger(env, 'STATEMENT_TIMEOUT_MS', DEFAULT_STATEMENT_TIMEOUT_MS, STATEMENT_TIMEOUT_BOUNDS),
     maxResponseBytes: parseInteger(env, 'MAX_RESPONSE_BYTES', DEFAULT_MAX_RESPONSE_BYTES, MAX_RESPONSE_BYTES_BOUNDS),
     maxCellChars: parseInteger(env, 'MAX_CELL_CHARS', DEFAULT_MAX_CELL_CHARS, MAX_CELL_CHARS_BOUNDS),
+    auditRedactArgs: parseBoolean(env, 'AUDIT_REDACT_ARGS', false),
   };
 }
 
@@ -47,4 +50,12 @@ function parseInteger(
     throw new Error(`${name} must be an integer between ${bounds.min} and ${bounds.max}, got '${raw}'`);
   }
   return value;
+}
+
+function parseBoolean(env: Env, name: string, fallback: boolean): boolean {
+  const raw = env[name]?.trim().toLowerCase();
+  if (raw === undefined || raw === '') return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  throw new Error(`${name} must be one of 1/0, true/false, yes/no, on/off, got '${env[name] ?? ''}'`);
 }
