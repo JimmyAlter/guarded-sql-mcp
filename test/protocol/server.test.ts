@@ -333,6 +333,24 @@ describe('results', () => {
 });
 
 describe('startup', () => {
+  it.each([
+    [{ maxRows: 101 }, /maxRows must be an integer between 1 and 100/],
+    [{ maxRows: 10_000 }, /maxRows/],
+    [{ maxRows: 0 }, /maxRows/],
+    [{ maxRows: 2.5 }, /maxRows/],
+    [{ limits: { maxResponseBytes: 10 * 1024 * 1024, maxCellChars: 1000 } }, /limits.maxResponseBytes/],
+    [{ limits: { maxResponseBytes: 65_536, maxCellChars: 10 } }, /limits.maxCellChars/],
+  ])('rejects options that would loosen the policy: %j', (options, message) => {
+    expect(() => createServer(new FakeExecutor(), options)).toThrow(message);
+  });
+
+  it('accepts a lower row cap and applies it', async () => {
+    const executor = new FakeExecutor(() => Array.from({ length: 50 }, (_, i) => ({ hostname: `h-${i}` })));
+    const { client } = await connect(executor, { maxRows: 5 });
+    const text = textOf(await client.callTool({ name: 'search_devices', arguments: { limit: 100 } }));
+    expect(JSON.parse(text)).toMatchObject({ rowCount: 5, hasMore: true });
+  });
+
   it('refuses to build a server from a catalog that fails validation', () => {
     const leaky: CatalogEntry = {
       ...CATALOG[0]!,

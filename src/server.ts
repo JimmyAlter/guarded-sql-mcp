@@ -8,7 +8,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { AuditLog } from './audit.js';
 import { CATALOG, type CatalogEntry } from './catalog.js';
 import { runQuery, type Executor } from './executor.js';
-import { MAX_ROWS } from './policy.js';
+import { MAX_CELL_CHARS_BOUNDS, MAX_RESPONSE_BYTES_BOUNDS, MAX_ROWS } from './policy.js';
 import { DEFAULT_RESPONSE_LIMITS, outputSchemaFor, shapeResponse, type ResponseLimits } from './response.js';
 import { validateCatalog } from './validateCatalog.js';
 
@@ -31,8 +31,12 @@ function readPackageVersion(): string {
 export interface ServerOptions {
   readonly catalog?: readonly CatalogEntry[];
   readonly audit?: AuditLog;
+  /** Row cap per call: an integer from 1 to MAX_ROWS (100). It can only lower the cap. */
   readonly maxRows?: number;
-  /** Response size limits. Defaults to 64 KiB per response and 1000 characters per cell. */
+  /**
+   * Response size limits. Defaults to 64 KiB per response and 1000 characters
+   * per cell; values outside the bounds accepted from the environment are rejected.
+   */
   readonly limits?: ResponseLimits;
 }
 
@@ -46,8 +50,21 @@ const TOOL_ANNOTATIONS = {
 export function createServer(executor: Executor, options: ServerOptions = {}): McpServer {
   const catalog = options.catalog ?? CATALOG;
   const audit = options.audit ?? new AuditLog();
-  const maxRows = options.maxRows ?? MAX_ROWS;
-  const limits = options.limits ?? DEFAULT_RESPONSE_LIMITS;
+  // Options can only tighten the policy. A caller passing maxRows: 10_000
+  // gets an error, not a server that returns 10,000 rows.
+  const maxRows = checkedInteger('maxRows', options.maxRows ?? MAX_ROWS, { min: 1, max: MAX_ROWS });
+  const limits: ResponseLimits = {
+    maxResponseBytes: checkedInteger(
+      'limits.maxResponseBytes',
+      options.limits?.maxResponseBytes ?? DEFAULT_RESPONSE_LIMITS.maxResponseBytes,
+      MAX_RESPONSE_BYTES_BOUNDS,
+    ),
+    maxCellChars: checkedInteger(
+      'limits.maxCellChars',
+      options.limits?.maxCellChars ?? DEFAULT_RESPONSE_LIMITS.maxCellChars,
+      MAX_CELL_CHARS_BOUNDS,
+    ),
+  };
 
   // A server is never built from a catalog that has not passed validation.
   validateCatalog(catalog);
@@ -121,6 +138,13 @@ export function createServer(executor: Executor, options: ServerOptions = {}): M
       };
     }
   }
+}
+
+function checkedInteger(name: string, value: number, bounds: { readonly min: number; readonly max: number }): number {
+  if (!Number.isInteger(value) || value < bounds.min || value > bounds.max) {
+    throw new RangeError(`${name} must be an integer between ${bounds.min} and ${bounds.max}, got ${value}`);
+  }
+  return value;
 }
 
 function elapsedMs(started: number): number {
