@@ -1,6 +1,7 @@
 # guarded-sql-mcp
 
 [![CI](https://github.com/JimmyAlter/guarded-sql-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/JimmyAlter/guarded-sql-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/JimmyAlter/guarded-sql-mcp)](https://github.com/JimmyAlter/guarded-sql-mcp/releases/latest)
 
 An MCP server that gives an LLM agent read access to a PostgreSQL database
 through a fixed catalog of parameterized queries. The model can pick a query
