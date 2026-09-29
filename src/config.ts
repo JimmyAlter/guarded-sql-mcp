@@ -24,17 +24,37 @@ export interface Config {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export function loadConfig(env: Env = process.env): Config {
-  const databaseUrl = env['DATABASE_URL'];
-  if (!databaseUrl) {
-    throw new Error('DATABASE_URL is not set. See .env.example.');
-  }
   return {
-    databaseUrl,
+    databaseUrl: parseDatabaseUrl(env['DATABASE_URL']),
     statementTimeoutMs: parseInteger(env, 'STATEMENT_TIMEOUT_MS', DEFAULT_STATEMENT_TIMEOUT_MS, STATEMENT_TIMEOUT_BOUNDS),
     maxResponseBytes: parseInteger(env, 'MAX_RESPONSE_BYTES', DEFAULT_MAX_RESPONSE_BYTES, MAX_RESPONSE_BYTES_BOUNDS),
     maxCellChars: parseInteger(env, 'MAX_CELL_CHARS', DEFAULT_MAX_CELL_CHARS, MAX_CELL_CHARS_BOUNDS),
     auditRedactArgs: parseBoolean(env, 'AUDIT_REDACT_ARGS', false),
   };
+}
+
+/**
+ * Accepts only a well-formed postgres:// or postgresql:// URL, so a typo fails
+ * at startup rather than on the first tool call. Error messages never include
+ * the value, which usually contains a password.
+ */
+function parseDatabaseUrl(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === '') {
+    throw new Error('DATABASE_URL is not set. See .env.example.');
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('DATABASE_URL is not a valid URL (expected postgres://user:password@host:port/database).');
+  }
+  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+    throw new Error(`DATABASE_URL must use the postgres:// or postgresql:// scheme, got '${url.protocol}//'.`);
+  }
+  if (url.hostname === '' && !url.searchParams.has('host')) {
+    throw new Error('DATABASE_URL has no host.');
+  }
+  return raw;
 }
 
 function parseInteger(

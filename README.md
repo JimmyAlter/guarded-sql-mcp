@@ -154,7 +154,7 @@ can write.
 
 | Variable | Default | |
 | --- | --- | --- |
-| `DATABASE_URL` | required | e.g. `postgres://mcp_readonly:mcp_readonly_dev@localhost:5432/inventory` |
+| `DATABASE_URL` | required | A `postgres://` or `postgresql://` URL, e.g. `postgres://mcp_readonly:mcp_readonly_dev@localhost:5432/inventory`. Anything else stops the server at startup |
 | `STATEMENT_TIMEOUT_MS` | `5000` | Per-statement timeout inside each transaction (1-600000) |
 | `MAX_RESPONSE_BYTES` | `65536` | Upper bound on one tool result's JSON body (4096-1048576) |
 | `MAX_CELL_CHARS` | `1000` | Longest string a cell may carry before it is cut (100-100000) |

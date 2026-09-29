@@ -8,6 +8,32 @@ describe('loadConfig', () => {
     expect(() => loadConfig({})).toThrow(/DATABASE_URL/);
   });
 
+  it.each([
+    'postgres://mcp_readonly:x@localhost:5432/inventory',
+    'postgresql://mcp_readonly:x@db.internal/inventory?sslmode=require',
+    'postgres://mcp_readonly@%2Fvar%2Frun%2Fpostgresql/inventory',
+  ])('accepts %s', (url) => {
+    expect(loadConfig({ DATABASE_URL: url }).databaseUrl).toBe(url);
+  });
+
+  it.each([
+    ['', /not set/],
+    ['   ', /not set/],
+    ['localhost:5432/inventory', /scheme/],
+    ['not a url', /not a valid URL/],
+    ['mysql://root:secret@localhost/inventory', /scheme, got 'mysql:\/\/'/],
+    ['http://mcp_readonly:secret@localhost/inventory', /scheme/],
+    ['postgres://', /no host/],
+  ])('rejects DATABASE_URL=%j', (url, message) => {
+    expect(() => loadConfig({ DATABASE_URL: url })).toThrow(message);
+  });
+
+  it('never echoes the URL (and its password) in the error', () => {
+    expect(() => loadConfig({ DATABASE_URL: 'mysql://root:hunter2@localhost/x' })).toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining('hunter2') }),
+    );
+  });
+
   it('applies defaults', () => {
     expect(loadConfig({ DATABASE_URL })).toEqual({
       databaseUrl: DATABASE_URL,
