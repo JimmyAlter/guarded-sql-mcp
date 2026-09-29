@@ -2,8 +2,9 @@
  * Integration tests against a real PostgreSQL loaded with db/schema.sql,
  * db/roles.sql and db/seed.sql, connected AS mcp_readonly.
  *
- * Skipped unless DATABASE_URL is set. Set REQUIRE_INTEGRATION=1 (CI does) to
- * turn a missing DATABASE_URL into a failure instead of a silent skip.
+ * Skipped unless DATABASE_URL (and, for the owner check, OWNER_DATABASE_URL)
+ * is set. Set REQUIRE_INTEGRATION=1 (CI does) to turn a missing variable into a
+ * failure instead of a silent skip.
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -18,9 +19,12 @@ import { checkConnectedRole } from '../../src/roleCheck.js';
 import { createServer } from '../../src/server.js';
 
 const DATABASE_URL = process.env['DATABASE_URL'];
+/** The database owner, used only to check that the privilege check fires (see the end of this file). */
+const OWNER_DATABASE_URL = process.env['OWNER_DATABASE_URL'];
 
-if (process.env['REQUIRE_INTEGRATION'] === '1' && !DATABASE_URL) {
-  throw new Error('REQUIRE_INTEGRATION=1 but DATABASE_URL is not set');
+if (process.env['REQUIRE_INTEGRATION'] === '1') {
+  if (!DATABASE_URL) throw new Error('REQUIRE_INTEGRATION=1 but DATABASE_URL is not set');
+  if (!OWNER_DATABASE_URL) throw new Error('REQUIRE_INTEGRATION=1 but OWNER_DATABASE_URL is not set');
 }
 
 /** Values planted in db/seed.sql that must never appear in any tool output. */
@@ -259,7 +263,6 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL, connected as mcp_readonly', () => {
 
 // The role check must also fire when it should. OWNER_DATABASE_URL (CI sets it)
 // connects as the database owner, a superuser that can do all of the above.
-const OWNER_DATABASE_URL = process.env['OWNER_DATABASE_URL'];
 
 describe.skipIf(!OWNER_DATABASE_URL)('startup privilege check, connected as the owner', () => {
   it('warns about superuser, writes, api_tokens and sensitive columns', async () => {
