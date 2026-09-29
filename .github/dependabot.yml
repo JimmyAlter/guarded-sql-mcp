@@ -4,6 +4,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Explicit form of Dependabot's default: a release must be 3 days old
+    # before it is proposed. Dependabot resolves npm with a matching --before
+    # date, so the lockfile must not pin anything newer than that either
+    # (install with `npm install --before=<3 days ago>` when in doubt), or
+    # its runs fail with ETARGET "No matching version found ... with a date
+    # before ...".
+    cooldown:
+      default-days: 3
+    ignore:
+      # engines.node is >=22; @types/node must track the oldest supported
+      # Node, not the newest.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       dev-dependencies:
         dependency-type: development
@@ -11,3 +24,5 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
