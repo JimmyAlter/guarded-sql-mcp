@@ -249,7 +249,32 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL, connected as mcp_readonly', () => {
     });
 
     it('passes the startup privilege check with no warnings', async () => {
+      // Covers superuser, BYPASSRLS, pg_read_all_data/pg_write_all_data,
+      // CREATE on a schema, TEMP, writable tables, any privilege on api_tokens
+      // and SELECT on people.password_hash / mfa_secret.
       expect(await checkConnectedRole(executor)).toEqual([]);
     });
+  });
+});
+
+// The role check must also fire when it should. OWNER_DATABASE_URL (CI sets it)
+// connects as the database owner, a superuser that can do all of the above.
+const OWNER_DATABASE_URL = process.env['OWNER_DATABASE_URL'];
+
+describe.skipIf(!OWNER_DATABASE_URL)('startup privilege check, connected as the owner', () => {
+  it('warns about superuser, writes, api_tokens and sensitive columns', async () => {
+    const owner = PgExecutor.connect(OWNER_DATABASE_URL!);
+    try {
+      const warnings = (await checkConnectedRole(owner)).join('\n');
+      expect(warnings).toMatch(/connected as superuser/);
+      expect(warnings).toMatch(/BYPASSRLS/);
+      expect(warnings).toMatch(/member of pg_read_all_data, pg_write_all_data/);
+      expect(warnings).toMatch(/can CREATE objects in schema public/);
+      expect(warnings).toMatch(/can write to tables in schema public: .*people/);
+      expect(warnings).toMatch(/outside ALLOWED_TABLES: api_tokens/);
+      expect(warnings).toMatch(/SELECT sensitive columns: .*api_tokens\.token_hash.*people\.mfa_secret, people\.password_hash/);
+    } finally {
+      await owner.close();
+    }
   });
 });

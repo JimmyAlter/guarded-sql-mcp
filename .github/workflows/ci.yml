@@ -69,5 +69,7 @@ jobs:
       - name: Integration tests (connected as mcp_readonly)
         env:
           DATABASE_URL: postgres://mcp_readonly:mcp_readonly_dev@localhost:5432/inventory
+          # Only used to check that the startup privilege check warns about an over-privileged role.
+          OWNER_DATABASE_URL: postgres://postgres:postgres@localhost:5432/inventory
           REQUIRE_INTEGRATION: "1"
         run: npm run test:integration

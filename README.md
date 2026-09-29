@@ -149,8 +149,13 @@ npm run build                 # produces dist/index.js
 The server reads its settings from environment variables and does not load
 `.env` files. [.env.example](.env.example) lists them, and the MCP client
 passes them (see below). Always connect as `mcp_readonly`, never as the owner.
-At startup the server logs a `privilege_warning` if the role is a superuser or
-can write.
+At startup the server logs a `privilege_warning` ([src/roleCheck.ts](src/roleCheck.ts))
+if the role is a superuser, has `BYPASSRLS`, is a member of `pg_read_all_data`
+or `pg_write_all_data`, can `CREATE` in a schema or create temporary tables,
+can write to any table in `public`, has any privilege on a table outside the
+allowlist (such as `api_tokens`), or can `SELECT` a column whose name looks
+sensitive (such as `people.password_hash`). The integration tests check that
+`mcp_readonly` gets no warnings and that the owner gets all of them.
 
 | Variable | Default | |
 | --- | --- | --- |
