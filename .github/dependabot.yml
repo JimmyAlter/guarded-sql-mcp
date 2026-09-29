@@ -17,6 +17,10 @@ updates:
       # Node, not the newest.
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
+      # typescript-eslint 8 supports typescript <6.1; a TypeScript major has to
+      # wait until typescript-eslint supports it (PR #2 proposed 7.x).
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
     groups:
       dev-dependencies:
         dependency-type: development

@@ -27,7 +27,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `SECURITY.md`: report through GitHub private vulnerability reporting, or
   privately via the maintainer's GitHub profile; never in a public issue.
 - Dependabot: the 3-day cooldown is explicit, and semver-major `@types/node`
-  updates are ignored (`engines.node` is `>=22`).
+  updates are ignored (`engines.node` is `>=22`), as are TypeScript majors
+  until typescript-eslint supports them.
 - vitest 5.
 
 ### Fixed
