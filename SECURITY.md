@@ -7,15 +7,17 @@ one person; there are no backports.
 
 ## Reporting a vulnerability
 
-Please do not put vulnerability details in a public issue. Report them
-privately:
+Please report vulnerabilities privately. Do not put details in a public
+issue, pull request or discussion.
 
-- through GitHub's private vulnerability reporting (the **Report a
-  vulnerability** button on the repository's
-  [Security tab](https://github.com/JimmyAlter/guarded-sql-mcp/security)),
-  when it is shown; or
-- by opening an issue titled "Security contact request", with no details, and
-  a private channel will be arranged.
+1. **Preferred:** GitHub private vulnerability reporting. On the repository's
+   [Security tab](https://github.com/JimmyAlter/guarded-sql-mcp/security), use
+   **Report a vulnerability** to open a private security advisory visible only
+   to you and the maintainer.
+2. **If that button is not available:** contact the maintainer privately using
+   the contact details on their GitHub profile,
+   [@JimmyAlter](https://github.com/JimmyAlter), and say that it concerns
+   guarded-sql-mcp.
 
 Include the version or commit, a description of the issue and, if you can, a
 minimal reproduction (a catalog entry, tool arguments or a database state).
