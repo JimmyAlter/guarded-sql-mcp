@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-29
+
+### Added
+
+- The startup privilege check also warns when the connected role has
+  `BYPASSRLS`, is a member of `pg_read_all_data` or `pg_write_all_data`, can
+  `CREATE` in a schema or create temporary tables, has any privilege on a
+  table outside the allowlist (such as `api_tokens`), or can `SELECT` a
+  column whose name looks sensitive (such as `people.password_hash`). CI checks
+  that `mcp_readonly` gets no warnings and the database owner gets all of them.
+- Release badge in the README and a `.mailmap` for a consistent author name.
+
+### Changed
+
+- **Breaking:** `DATABASE_URL` must be a `postgres://` or `postgresql://` URL
+  with a host; anything else (including libpq key=value strings) stops the
+  server at startup. Errors never include the value.
+- **Breaking:** `createServer` rejects `maxRows` outside 1-100 and response
+  limits outside the bounds accepted from the environment, instead of using
+  them. Options can only tighten the policy.
+- `SECURITY.md`: report through GitHub private vulnerability reporting, or
+  privately via the maintainer's GitHub profile; never in a public issue.
+- Dependabot: the 3-day cooldown is explicit, and semver-major `@types/node`
+  updates are ignored (`engines.node` is `>=22`).
+- vitest 5.
+
+### Fixed
+
+- Dependabot npm runs failed with `ETARGET ... with a date before`: the
+  lockfile pinned `typescript-eslint` 8.71.0, published inside the cooldown
+  window. The lockfile is now resolved with `npm install --before`.
+
 ## [0.2.0] - 2026-09-28
 
 ### Added
@@ -68,5 +100,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Generic errors to the model; JSON-lines audit log on stderr.
 - Unit, protocol and PostgreSQL 16 integration tests in CI.
 
+[0.3.0]: https://github.com/JimmyAlter/guarded-sql-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/JimmyAlter/guarded-sql-mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/JimmyAlter/guarded-sql-mcp/releases/tag/v0.1.0
